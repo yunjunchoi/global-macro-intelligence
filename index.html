@@ -46,6 +46,71 @@ const T={
 };
 
 /* ════════════════════════════════════════════════════════════════
+   LIVE DATA — API KEYS & HELPERS
+════════════════════════════════════════════════════════════════ */
+const FRED_KEY='b265c038167e9fa6fc34678a62c9c2a4';
+const AV_KEY='E4707A6I8NXZOF6K';
+const FH_KEY='d6hg6m9r01qr5k4breqgd6hg6m9r01qr5k4brer0';
+
+// React Context for live data sharing across all components
+const LiveCtx=React.createContext(null);
+function useLive(){return React.useContext(LiveCtx)||{};}
+
+// FRED: fetch series observations, return most recent non-null value
+async function fredVal(series){
+  try{
+    const r=await fetch(`https://api.stlouisfed.org/fred/series/observations?series_id=${series}&api_key=${FRED_KEY}&limit=5&sort_order=desc&file_type=json`);
+    const d=await r.json();
+    const obs=d.observations?.filter(o=>o.value!=='.'&&o.value!='');
+    return obs?.length?parseFloat(obs[0].value):null;
+  }catch{return null;}
+}
+
+// FRED CPI YoY: compare latest month to 12 months prior
+async function fredCpiYoy(){
+  try{
+    const r=await fetch(`https://api.stlouisfed.org/fred/series/observations?series_id=CPIAUCSL&api_key=${FRED_KEY}&limit=15&sort_order=desc&file_type=json`);
+    const d=await r.json();
+    const obs=d.observations?.filter(o=>o.value!=='.')||[];
+    if(obs.length<13)return null;
+    return +((parseFloat(obs[0].value)/parseFloat(obs[12].value)-1)*100).toFixed(2);
+  }catch{return null;}
+}
+
+// Alpha Vantage: commodity (WTI/BRENT/NATURAL_GAS/COPPER)
+async function avComm(func){
+  try{
+    const r=await fetch(`https://www.alphavantage.co/query?function=${func}&interval=monthly&apikey=${AV_KEY}`);
+    const d=await r.json();
+    // Check for rate limit message
+    if(d['Note']||d['Information'])return null;
+    const latest=d.data?.[0];
+    return latest?+parseFloat(latest.value).toFixed(3):null;
+  }catch{return null;}
+}
+
+// Finnhub: market news
+async function fhNews(){
+  try{
+    const r=await fetch(`https://finnhub.io/api/v1/news?category=general&token=${FH_KEY}`);
+    const d=await r.json();
+    return Array.isArray(d)?d.filter(n=>n.headline&&n.url).slice(0,20):[];
+  }catch{return[];}
+}
+
+// Finnhub: economic calendar (past 7 days + next 14 days)
+async function fhEconCal(){
+  try{
+    const from=new Date();from.setDate(from.getDate()-7);
+    const to=new Date();to.setDate(to.getDate()+14);
+    const fmt=d=>d.toISOString().slice(0,10);
+    const r=await fetch(`https://finnhub.io/api/v1/calendar/economic?from=${fmt(from)}&to=${fmt(to)}&token=${FH_KEY}`);
+    const d=await r.json();
+    return d.economicCalendar?.filter(e=>['High','Medium'].includes(e.impact)).slice(0,25)||[];
+  }catch{return[];}
+}
+
+/* ════════════════════════════════════════════════════════════════
    DATA — 9 REGIONS
 ════════════════════════════════════════════════════════════════ */
 const REGIONS=[
@@ -1521,102 +1586,294 @@ function HedgeFundView(){
 function MarketsView(){
   const [tab,setTab]=useState("indices");
   const [cryptoData,setCryptoData]=useState([
-    {n:"BTC",p:85420,c:2.3},{n:"ETH",p:2180,c:1.8},{n:"BNB",p:412,c:.8},{n:"XRP",p:2.18,c:-1.2},{n:"SOL",p:142.5,c:3.1},{n:"ADA",p:.48,c:-.5},
+    {n:"BTC",p:85420,c:2.3},{n:"ETH",p:2180,c:1.8},{n:"BNB",p:412,c:.8},
+    {n:"XRP",p:2.18,c:-1.2},{n:"SOL",p:142.5,c:3.1},{n:"ADA",p:.48,c:-.5},
   ]);
   const [fxData,setFxData]=useState({USD:1,KRW:1368.5,JPY:149.2,EUR:.918,CNY:7.24,GBP:.782,AUD:1.562,CAD:1.382,MXN:17.85,BRL:4.97});
   const [fxLive,setFxLive]=useState(false);
+  const live=useLive();
+  const fred=live.fred||{};
+  const av=live.av||{};
+  const fh=live.fh||{news:[],econ:[]};
 
   useEffect(()=>{
-    fetch("https://api.exchangerate-api.com/v4/latest/USD").then(r=>r.json()).then(d=>{setFxData({USD:1,KRW:d.rates.KRW,JPY:d.rates.JPY,EUR:d.rates.EUR,CNY:d.rates.CNY,GBP:d.rates.GBP,AUD:d.rates.AUD,CAD:d.rates.CAD,MXN:d.rates.MXN,BRL:d.rates.BRL});setFxLive(true);}).catch(()=>{});
-    fetch("https://api.coingecko.com/api/v3/simple/price?ids=bitcoin,ethereum,binancecoin,ripple,solana,cardano&vs_currencies=usd&include_24hr_change=true").then(r=>r.json()).then(d=>{setCryptoData([{n:"BTC",p:d.bitcoin?.usd,c:d.bitcoin?.usd_24h_change},{n:"ETH",p:d.ethereum?.usd,c:d.ethereum?.usd_24h_change},{n:"BNB",p:d["binancecoin"]?.usd,c:d["binancecoin"]?.usd_24h_change},{n:"XRP",p:d.ripple?.usd,c:d.ripple?.usd_24h_change},{n:"SOL",p:d.solana?.usd,c:d.solana?.usd_24h_change},{n:"ADA",p:d.cardano?.usd,c:d.cardano?.usd_24h_change}]);}).catch(()=>{});
+    fetch("https://api.exchangerate-api.com/v4/latest/USD").then(r=>r.json()).then(d=>{
+      setFxData({USD:1,KRW:d.rates.KRW,JPY:d.rates.JPY,EUR:d.rates.EUR,CNY:d.rates.CNY,
+        GBP:d.rates.GBP,AUD:d.rates.AUD,CAD:d.rates.CAD,MXN:d.rates.MXN,BRL:d.rates.BRL});
+      setFxLive(true);
+    }).catch(()=>{});
+    fetch("https://api.coingecko.com/api/v3/simple/price?ids=bitcoin,ethereum,binancecoin,ripple,solana,cardano&vs_currencies=usd&include_24hr_change=true").then(r=>r.json()).then(d=>{
+      setCryptoData([{n:"BTC",p:d.bitcoin?.usd,c:d.bitcoin?.usd_24h_change},
+        {n:"ETH",p:d.ethereum?.usd,c:d.ethereum?.usd_24h_change},
+        {n:"BNB",p:d["binancecoin"]?.usd,c:d["binancecoin"]?.usd_24h_change},
+        {n:"XRP",p:d.ripple?.usd,c:d.ripple?.usd_24h_change},
+        {n:"SOL",p:d.solana?.usd,c:d.solana?.usd_24h_change},
+        {n:"ADA",p:d.cardano?.usd,c:d.cardano?.usd_24h_change}]);
+    }).catch(()=>{});
   },[]);
 
-  const fxPairs=[{p:"USD/KRW",v:fxData.KRW,f:"🇺🇸🇰🇷",d:1},{p:"USD/JPY",v:fxData.JPY,f:"🇺🇸🇯🇵",d:2},{p:"EUR/USD",v:1/fxData.EUR,f:"🇪🇺🇺🇸",d:4},{p:"USD/CNY",v:fxData.CNY,f:"🇺🇸🇨🇳",d:4},{p:"GBP/USD",v:1/fxData.GBP,f:"🇬🇧🇺🇸",d:4},{p:"USD/MXN",v:fxData.MXN,f:"🇺🇸🇲🇽",d:4},{p:"AUD/USD",v:1/fxData.AUD,f:"🇦🇺🇺🇸",d:4},{p:"USD/BRL",v:fxData.BRL,f:"🇺🇸🇧🇷",d:4}];
+  const fxPairs=[
+    {p:"USD/KRW",v:fxData.KRW,f:"🇺🇸🇰🇷",d:1},{p:"USD/JPY",v:fxData.JPY,f:"🇺🇸🇯🇵",d:2},
+    {p:"EUR/USD",v:1/fxData.EUR,f:"🇪🇺🇺🇸",d:4},{p:"USD/CNY",v:fxData.CNY,f:"🇺🇸🇨🇳",d:4},
+    {p:"GBP/USD",v:1/fxData.GBP,f:"🇬🇧🇺🇸",d:4},{p:"USD/MXN",v:fxData.MXN,f:"🇺🇸🇲🇽",d:4},
+    {p:"AUD/USD",v:1/fxData.AUD,f:"🇦🇺🇺🇸",d:4},{p:"USD/BRL",v:fxData.BRL,f:"🇺🇸🇧🇷",d:4},
+  ];
+
+  const commItems=[
+    {s:"🛢 WTI 원유",  p:av.wti,    col:"#ff7043",live:!!av.wti,   unit:"$/bbl",  fb:68.5},
+    {s:"🛢 Brent",     p:av.brent,  col:"#ff9800",live:!!av.brent, unit:"$/bbl",  fb:72.2},
+    {s:"🔥 천연가스",  p:av.natgas, col:"#4caf50",live:!!av.natgas,unit:"$/MMBtu",fb:3.82},
+    {s:"🔶 구리",      p:av.copper, col:"#b87333",live:!!av.copper,unit:"$/lb",   fb:4.52},
+    {s:"🥇 금",        p:null,      col:"#ffd700",live:false,      unit:"$/oz",   fb:3018, note:"TradingView"},
+    {s:"🥈 은",        p:null,      col:"#c0c0c0",live:false,      unit:"$/oz",   fb:33.2, note:"추정"},
+    {s:"⚙️ 니켈",     p:null,      col:"#888",   live:false,      unit:"$/t",    fb:16420,note:"추정"},
+    {s:"🔋 리튬",      p:null,      col:"#64b5f6",live:false,      unit:"K$/t",   fb:12.4, note:"추정"},
+    {s:"🧲 희토류",    p:null,      col:"#ce93d8",live:false,      unit:"—",      fb:null, note:"공개 API 없음"},
+  ];
+
+  const usR=REGIONS.find(r=>r.id==="us");
+  const regionsLive=REGIONS.map(r=>{
+    if(r.id==="us"&&live.fredLive&&fred.rate10y){
+      return{...r,
+        policyRate:fred.fedRate!=null?+fred.fedRate.toFixed(2):r.policyRate,
+        rate10y:fred.rate10y!=null?+fred.rate10y.toFixed(2):r.rate10y,
+        rate2y:fred.rate2y!=null?+fred.rate2y.toFixed(2):r.rate2y,
+        yields:fred.yields&&fred.yields.some(v=>v>0)?fred.yields:r.yields,
+      };
+    }
+    return r;
+  });
+
+  const Dot=({on,label,col})=>(
+    <span style={{fontSize:8,color:on?col:T.dim,fontFamily:"JetBrains Mono",padding:"2px 7px",
+      border:`1px solid ${on?col:T.dim}44`,borderRadius:2}}>
+      ● {label}{on?"·LIVE":"·오프"}
+    </span>
+  );
 
   return(
     <div style={{display:"flex",flexDirection:"column",height:"100%"}}>
-      <div style={{padding:"6px 14px",background:T.panel2,borderBottom:`1px solid ${T.border}`,display:"flex",gap:4}}>
-        {[["indices","주요지수"],["fx","환율"],["crypto","크립토"],["commodities","원자재"],["rates","금리"],["calendar","캘린더"]].map(([id,lbl])=>(
+      <div style={{padding:"6px 14px",background:T.panel2,borderBottom:`1px solid ${T.border}`,display:"flex",gap:4,alignItems:"center",flexWrap:"wrap"}}>
+        {[["indices","주요지수"],["fx","환율"],["crypto","크립토"],["commodities","원자재"],["rates","금리"],["news","뉴스·캘린더"],["calendar","경제캘린더"]].map(([id,lbl])=>(
           <button key={id} className={`btn${tab===id?" a":""}`} onClick={()=>setTab(id)}>{lbl}</button>
         ))}
-        <div style={{marginLeft:"auto",display:"flex",alignItems:"center",gap:6}}>
-          <span style={{fontSize:8,color:fxLive?T.green:T.muted,fontFamily:"JetBrains Mono"}}>● {fxLive?"LIVE · ExchangeRate-API":"연결 중..."}</span>
+        <div style={{marginLeft:"auto",display:"flex",gap:5,alignItems:"center"}}>
+          {live.loading&&<span style={{fontSize:8,color:T.muted,fontFamily:"JetBrains Mono"}}>⟳ 로딩중...</span>}
+          <Dot on={live.fredLive} label="FRED" col={T.green}/>
+          <Dot on={live.avLive}   label="AV"   col={T.gold}/>
+          <Dot on={live.fhLive}   label="FH"   col={T.purple}/>
+          <Dot on={fxLive}        label="FX"   col={T.accent}/>
         </div>
       </div>
       <div style={{flex:1,overflow:"hidden"}}>
-        {tab==="indices"&&<TV type="market-overview" height="100%" opts={{dateRange:"1D",showChart:true,showFloatingTooltip:true,showSymbolLogo:true,tabs:[{title:"전체",symbols:[{s:"FOREXCOM:SPXUSD",d:"S&P500"},{s:"FOREXCOM:NSXUSD",d:"NASDAQ"},{s:"KRX:KOSPI",d:"KOSPI"},{s:"KRX:KOSDAQ",d:"KOSDAQ"},{s:"INDEX:NKY",d:"NIKKEI"},{s:"INDEX:DEU40",d:"DAX"},{s:"INDEX:HSI",d:"항셍"},{s:"SSE:000001",d:"상하이"},{s:"BMFBOVESPA:IBOV",d:"BOVESPA"},{s:"INDEX:TASI",d:"TADAWUL"},{s:"ASX:XJO",d:"ASX200"},{s:"INDEX:SENSEX",d:"SENSEX"},{s:"TWSE:Y9999",d:"TAIEX"}]},{title:"한국",symbols:[{s:"KRX:KOSPI",d:"KOSPI"},{s:"KRX:KOSDAQ",d:"KOSDAQ"},{s:"KRX:005930",d:"삼성전자"},{s:"KRX:000660",d:"SK하이닉스"},{s:"KRX:035420",d:"NAVER"},{s:"KRX:086520",d:"에코프로"},{s:"KRX:373220",d:"LG에너지솔루션"},{s:"KRX:000270",d:"기아"}]}]}}/>}
+        {/* 주요 지수 — TradingView */}
+        {tab==="indices"&&<TV type="market-overview" height="100%" opts={{dateRange:"1D",showChart:true,showFloatingTooltip:true,showSymbolLogo:true,tabs:[
+          {title:"전체",symbols:[{s:"FOREXCOM:SPXUSD",d:"S&P500"},{s:"FOREXCOM:NSXUSD",d:"NASDAQ"},{s:"KRX:KOSPI",d:"KOSPI"},{s:"KRX:KOSDAQ",d:"KOSDAQ"},
+            {s:"INDEX:NKY",d:"NIKKEI"},{s:"INDEX:DEU40",d:"DAX"},{s:"INDEX:HSI",d:"항셍"},{s:"SSE:000001",d:"상하이"},
+            {s:"BMFBOVESPA:IBOV",d:"BOVESPA"},{s:"INDEX:TASI",d:"TADAWUL"},{s:"ASX:XJO",d:"ASX200"},{s:"TWSE:Y9999",d:"TAIEX"}]},
+          {title:"한국",symbols:[{s:"KRX:KOSPI",d:"KOSPI"},{s:"KRX:KOSDAQ",d:"KOSDAQ"},{s:"KRX:005930",d:"삼성전자"},
+            {s:"KRX:000660",d:"SK하이닉스"},{s:"KRX:035420",d:"NAVER"},{s:"KRX:086520",d:"에코프로"},{s:"KRX:373220",d:"LG에너지솔루션"},{s:"KRX:000270",d:"기아"}]},
+        ]}}/>}
+
+        {/* 환율 — ExchangeRate-API LIVE */}
         {tab==="fx"&&(
-          <div style={{padding:"12px 14px",display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+          <div style={{padding:"14px",display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,overflowY:"auto"}}>
             {fxPairs.map(x=>(
-              <div key={x.p} style={{display:"flex",alignItems:"center",gap:10,padding:"8px 12px",background:T.panel,borderRadius:4,border:`1px solid ${T.border}`}}>
-                <span style={{fontSize:16}}>{x.f}</span>
-                <span style={{color:T.accent,fontFamily:"JetBrains Mono",fontSize:11,fontWeight:700,minWidth:82}}>{x.p}</span>
-                <span style={{color:T.text,fontFamily:"JetBrains Mono",fontSize:13,fontWeight:700,flex:1}}>{parseFloat(x.v).toFixed(x.d)}</span>
+              <div key={x.p} style={{display:"flex",alignItems:"center",gap:10,padding:"11px 14px",background:T.panel,borderRadius:5,border:`1px solid ${T.border}`}}>
+                <span style={{fontSize:18}}>{x.f}</span>
+                <span style={{color:T.accent,fontFamily:"JetBrains Mono",fontSize:11,fontWeight:700,minWidth:90}}>{x.p}</span>
+                <span style={{color:T.text,fontFamily:"JetBrains Mono",fontSize:16,fontWeight:700,flex:1}}>{parseFloat(x.v).toFixed(x.d)}</span>
+                {fxLive&&<span style={{fontSize:7,color:T.green,background:T.green+"12",padding:"2px 5px",borderRadius:2,fontFamily:"JetBrains Mono",border:`1px solid ${T.green}33`}}>LIVE</span>}
               </div>
             ))}
           </div>
         )}
+
+        {/* 크립토 — CoinGecko LIVE */}
         {tab==="crypto"&&(
-          <div style={{padding:"12px 14px"}}>
-            <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:6,marginBottom:12}}>
+          <div style={{padding:"12px 14px",overflowY:"auto"}}>
+            <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:7,marginBottom:12}}>
               {cryptoData.map(x=>(
-                <div key={x.n} style={{background:T.panel,borderRadius:4,padding:"10px 12px",border:`1px solid ${T.border}`}}>
-                  <div style={{fontSize:11,color:T.gold,fontWeight:700,fontFamily:"JetBrains Mono",marginBottom:4}}>{x.n}</div>
-                  <div style={{fontSize:14,color:T.text,fontWeight:700,fontFamily:"JetBrains Mono"}}>${x.p?.toLocaleString("en-US",{maximumFractionDigits:2})}</div>
+                <div key={x.n} style={{background:T.panel,borderRadius:5,padding:"11px 13px",border:`1px solid ${T.border}`}}>
+                  <div style={{display:"flex",justifyContent:"space-between",marginBottom:4}}>
+                    <span style={{fontSize:12,color:T.gold,fontWeight:700,fontFamily:"JetBrains Mono"}}>{x.n}</span>
+                    <span style={{fontSize:7,color:T.green,background:T.green+"12",padding:"2px 5px",borderRadius:2,fontFamily:"JetBrains Mono"}}>● LIVE</span>
+                  </div>
+                  <div style={{fontSize:15,color:T.text,fontWeight:700,fontFamily:"JetBrains Mono"}}>${x.p?.toLocaleString("en-US",{maximumFractionDigits:2})}</div>
                   <div style={{fontSize:10,color:(x.c||0)>=0?T.green:T.red,fontFamily:"JetBrains Mono"}}>{(x.c||0)>=0?"▲":"▼"}{Math.abs(x.c||0).toFixed(2)}%</div>
                 </div>
               ))}
             </div>
-            <TV type="screener" height={280} opts={{defaultScreen:"crypto",market:"crypto",showToolbar:false}}/>
+            <TV type="screener" height={260} opts={{defaultScreen:"crypto",market:"crypto",showToolbar:false}}/>
           </div>
         )}
+
+        {/* 원자재 — Alpha Vantage LIVE */}
         {tab==="commodities"&&(
-          <div style={{padding:"12px 14px"}}>
-            <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:6,marginBottom:12}}>
-              {[{s:"금",p:3018,c:0.82,col:"#ffd700"},{s:"은",p:33.2,c:1.1,col:"#c0c0c0"},{s:"WTI",p:68.5,c:-0.6,col:"#ff7043"},{s:"Brent",p:72.2,c:-0.4,col:"#ff9800"},{s:"NatGas",p:3.82,c:2.1,col:"#4caf50"},{s:"구리",p:4.52,c:0.35,col:"#b87333"},{s:"니켈",p:16420,c:-1.2,col:"#888"},{s:"리튬",p:12.4,c:-2.1,col:"#64b5f6"},{s:"희토류",p:null,c:null,col:"#ce93d8"}].map(x=>(
-                <div key={x.s} style={{background:T.panel,borderRadius:4,padding:"10px 12px",border:`1px solid ${x.col}33`}}>
-                  <div style={{fontSize:10,color:x.col,fontWeight:700,fontFamily:"JetBrains Mono",marginBottom:3}}>{x.s}</div>
-                  <div style={{fontSize:13,color:T.text,fontWeight:700,fontFamily:"JetBrains Mono"}}>{x.p?`$${x.p.toLocaleString()}`:"시세 없음"}</div>
-                  {x.c!=null&&<div style={{fontSize:9,color:x.c>=0?T.green:T.red,fontFamily:"JetBrains Mono"}}>{x.c>=0?"▲":"▼"}{Math.abs(x.c)}%</div>}
+          <div style={{padding:"12px 14px",overflowY:"auto"}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
+              <span style={{fontSize:9,color:T.muted,fontFamily:"JetBrains Mono",fontWeight:700,letterSpacing:".08em"}}>원자재 시세</span>
+              <div style={{display:"flex",gap:8,fontSize:8,fontFamily:"JetBrains Mono"}}>
+                <span style={{color:T.gold}}>● AV LIVE: WTI·Brent·천연가스·구리</span>
+                <span style={{color:T.dim}}>● 추정: 금·은·니켈·리튬</span>
+              </div>
+            </div>
+            <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:7,marginBottom:14}}>
+              {commItems.map(x=>{
+                const val=x.p??x.fb;
+                return(
+                  <div key={x.s} style={{background:T.panel,borderRadius:5,padding:"12px 13px",border:`1px solid ${x.col}33`}}>
+                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:5}}>
+                      <span style={{fontSize:11,color:x.col,fontWeight:700,fontFamily:"JetBrains Mono"}}>{x.s}</span>
+                      {x.live
+                        ?<span style={{fontSize:7,color:T.gold,background:T.gold+"12",padding:"2px 5px",borderRadius:2,fontFamily:"JetBrains Mono",border:`1px solid ${T.gold}33`}}>● LIVE</span>
+                        :<span style={{fontSize:7,color:T.dim,background:"#1c253522",padding:"2px 5px",borderRadius:2,fontFamily:"JetBrains Mono"}}>{x.note||"추정"}</span>}
+                    </div>
+                    <div style={{fontSize:17,color:T.text,fontWeight:700,fontFamily:"JetBrains Mono"}}>
+                      {val!=null?`$${typeof val==="number"&&val>999?val.toLocaleString():val}`:"-"}
+                    </div>
+                    <div style={{fontSize:8,color:T.muted,fontFamily:"JetBrains Mono",marginTop:3}}>{x.unit}</div>
+                  </div>
+                );
+              })}
+            </div>
+            <TV type="market-overview" height={250} opts={{dateRange:"1D",showChart:false,tabs:[{title:"원자재",symbols:[
+              {s:"COMEX:GC1!",d:"금"},{s:"COMEX:SI1!",d:"은"},{s:"NYMEX:CL1!",d:"WTI"},{s:"NYMEX:NG1!",d:"천연가스"},
+              {s:"COMEX:HG1!",d:"구리"},{s:"COMEX:PL1!",d:"백금"},{s:"CBOT:ZC1!",d:"옥수수"},{s:"CBOT:ZW1!",d:"밀"},
+            ]}]}}/>
+          </div>
+        )}
+
+        {/* 금리 — FRED LIVE 수익률 곡선 */}
+        {tab==="rates"&&(
+          <div style={{padding:"12px 14px",overflowY:"auto"}}>
+            {live.fredLive&&(
+              <div style={{background:T.panel,border:`1px solid ${T.green}44`,borderRadius:6,padding:"12px 14px",marginBottom:14}}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
+                  <span style={{fontSize:10,color:T.green,fontFamily:"JetBrains Mono",fontWeight:700}}>🏛 FRED 실시간 · 미국 주요 거시지표</span>
+                  <span style={{fontSize:7,color:T.muted,fontFamily:"JetBrains Mono"}}>업데이트: {live.lastUpdated?.toLocaleTimeString("ko-KR",{hour12:false})}</span>
                 </div>
-              ))}
+                <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:8}}>
+                  {[
+                    {l:"기준금리 (DFF)",    v:fred.fedRate,    u:"%", c:T.accent},
+                    {l:"실업률 (UNRATE)",   v:fred.unemployment,u:"%", c:fred.unemployment<4?T.green:T.orange},
+                    {l:"CPI YoY",           v:fred.cpi,        u:"%", c:fred.cpi<3?T.green:fred.cpi<4?T.orange:T.red},
+                    {l:"GDP 성장 (분기)",   v:fred.gdpGrowth,  u:"%", c:fred.gdpGrowth>2?T.green:fred.gdpGrowth>0?T.gold:T.red},
+                    {l:"2Y 국채",           v:fred.rate2y,     u:"%", c:T.gold},
+                    {l:"10Y 국채",          v:fred.rate10y,    u:"%", c:T.gold},
+                    {l:"2Y-10Y 스프레드",   v:fred.rate10y!=null&&fred.rate2y!=null?+(fred.rate10y-fred.rate2y).toFixed(2):null,u:"%p",c:(fred.rate10y-fred.rate2y)<0?T.red:T.green},
+                    {l:"30Y 국채",          v:fred.rate30y,    u:"%", c:T.muted},
+                  ].map((item,i)=>(
+                    <div key={i} style={{background:T.panel2,borderRadius:4,padding:"9px 11px",border:`1px solid ${item.c}22`}}>
+                      <div style={{fontSize:7.5,color:T.muted,fontFamily:"JetBrains Mono",marginBottom:4}}>{item.l}</div>
+                      <div style={{fontSize:16,fontWeight:700,color:item.c,fontFamily:"JetBrains Mono"}}>
+                        {item.v!=null?`${item.v}${item.u}`:"—"}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+            <div style={{display:"grid",gridTemplateColumns:"repeat(2,1fr)",gap:8}}>
+              {regionsLive.map(r=>{
+                const isUsLive=r.id==="us"&&live.fredLive;
+                const ylds=r.yields||[];
+                const valid=ylds.filter(v=>v>0);
+                if(valid.length<2)return null;
+                const mn=Math.min(...valid)-.1,mx=Math.max(...valid)+.1,rng=mx-mn||1;
+                const W=180,H=50;
+                const pts=ylds.map((v,i)=>`${(i/(ylds.length-1))*W},${H-((v-mn)/rng)*(H-8)-4}`).join(" ");
+                const inv=ylds[4]<ylds[2];
+                return(
+                  <div key={r.id} style={{background:T.panel,borderRadius:5,padding:"10px 12px",border:`1px solid ${r.color}33`}}>
+                    <div style={{display:"flex",justifyContent:"space-between",marginBottom:8,alignItems:"center"}}>
+                      <div style={{display:"flex",alignItems:"center",gap:6}}>
+                        <span style={{fontSize:14}}>{r.flag}</span>
+                        <span style={{fontSize:11,color:r.color,fontWeight:700,fontFamily:"Space Grotesk"}}>{r.name}</span>
+                        {isUsLive&&<span style={{fontSize:7,color:T.green,background:T.green+"12",padding:"1px 5px",borderRadius:2,fontFamily:"JetBrains Mono"}}>● FRED</span>}
+                      </div>
+                      <div style={{textAlign:"right"}}>
+                        <div style={{fontSize:8,color:T.muted,fontFamily:"JetBrains Mono"}}>기준금리</div>
+                        <div style={{fontSize:13,color:r.color,fontWeight:700,fontFamily:"JetBrains Mono"}}>{r.policyRate}%</div>
+                      </div>
+                    </div>
+                    <svg width={W} height={H} style={{display:"block",marginBottom:4}}>
+                      <polyline points={pts} fill="none" stroke={inv?T.red:r.color} strokeWidth="1.5" strokeLinejoin="round"/>
+                      {ylds.map((v,i)=>{const x=(i/(ylds.length-1))*W,y=H-((v-mn)/rng)*(H-8)-4;return<circle key={i} cx={x} cy={y} r="2.5" fill={inv?T.red:r.color}/>;  })}
+                    </svg>
+                    <div style={{display:"flex",justifyContent:"space-between",marginBottom:3}}>
+                      {["1M","3M","6M","1Y","2Y","5Y","10Y","30Y"].map(t=><span key={t} style={{fontSize:6.5,color:T.dim,fontFamily:"JetBrains Mono"}}>{t}</span>)}
+                    </div>
+                    <div style={{fontSize:8,color:inv?T.red:T.green,fontFamily:"JetBrains Mono",fontWeight:700}}>{inv?"⚠️ 역전":"✅ 정상"} · 10Y: {r.rate10y}%</div>
+                  </div>
+                );
+              })}
             </div>
           </div>
         )}
-        {tab==="rates"&&(
-          <div style={{padding:"12px 14px"}}>
-            <div style={{display:"grid",gridTemplateColumns:"repeat(2,1fr)",gap:8}}>
-              {REGIONS.map(r=>(
-                <div key={r.id} style={{background:T.panel,borderRadius:5,padding:"10px 12px",border:`1px solid ${r.color}33`}}>
-                  <div style={{display:"flex",justifyContent:"space-between",marginBottom:8}}>
-                    <div style={{display:"flex",alignItems:"center",gap:6}}><span style={{fontSize:14}}>{r.flag}</span><span style={{fontSize:11,color:r.color,fontWeight:700,fontFamily:"Space Grotesk"}}>{r.name}</span></div>
-                    <div style={{textAlign:"right"}}>
-                      <div style={{fontSize:9,color:T.muted,fontFamily:"JetBrains Mono"}}>기준금리</div>
-                      <div style={{fontSize:13,color:r.color,fontWeight:700,fontFamily:"JetBrains Mono"}}>{r.policyRate}%</div>
+
+        {/* 뉴스 — Finnhub LIVE */}
+        {tab==="news"&&(
+          <div style={{display:"flex",height:"100%",overflow:"hidden"}}>
+            <div style={{flex:1,overflowY:"auto",padding:"10px 12px",borderRight:`1px solid ${T.border}`}}>
+              <div style={{fontSize:9,color:T.purple,fontFamily:"JetBrains Mono",fontWeight:700,marginBottom:8,letterSpacing:".08em"}}>
+                🦁 FINNHUB 글로벌 뉴스
+                {fh.news.length>0&&<span style={{color:T.green,marginLeft:6}}>● LIVE · {fh.news.length}건</span>}
+                {live.loading&&<span style={{color:T.muted,marginLeft:6}}>⟳ 로딩중...</span>}
+              </div>
+              {!live.loading&&fh.news.length===0&&(
+                <div style={{color:T.muted,fontFamily:"JetBrains Mono",fontSize:10,padding:"20px 0",lineHeight:1.8}}>
+                  뉴스를 불러오지 못했습니다.<br/>CORS 제한으로 직접 접속 필요할 수 있습니다.
+                </div>
+              )}
+              {fh.news.map((n,i)=>(
+                <a key={i} href={n.url} target="_blank" rel="noopener"
+                  style={{display:"block",padding:"10px 12px",background:T.panel,borderRadius:5,marginBottom:6,
+                    border:`1px solid ${T.border}`,textDecoration:"none",transition:"border-color .15s"}}
+                  onMouseEnter={e=>e.currentTarget.style.borderColor=T.purple+"88"}
+                  onMouseLeave={e=>e.currentTarget.style.borderColor=T.border}>
+                  <div style={{display:"flex",justifyContent:"space-between",marginBottom:4}}>
+                    <span style={{fontSize:8,color:T.purple,fontFamily:"JetBrains Mono",fontWeight:700}}>{n.source}</span>
+                    <span style={{fontSize:7,color:T.muted,fontFamily:"JetBrains Mono"}}>
+                      {n.datetime?new Date(n.datetime*1000).toLocaleString("ko-KR",{month:"numeric",day:"numeric",hour:"2-digit",minute:"2-digit"}):""}
+                    </span>
+                  </div>
+                  <div style={{fontSize:11,color:T.text,fontFamily:"Space Grotesk",fontWeight:600,lineHeight:1.5,marginBottom:3}}>{n.headline}</div>
+                  {n.summary&&<div style={{fontSize:8.5,color:T.muted,fontFamily:"JetBrains Mono",lineHeight:1.6,overflow:"hidden",display:"-webkit-box",WebkitLineClamp:2,WebkitBoxOrient:"vertical"}}>{n.summary}</div>}
+                  <div style={{marginTop:5,fontSize:7.5,color:T.accent}}>↗ 원문 보기</div>
+                </a>
+              ))}
+            </div>
+            <div style={{width:290,overflowY:"auto",padding:"10px 12px",background:T.panel2}}>
+              <div style={{fontSize:9,color:T.gold,fontFamily:"JetBrains Mono",fontWeight:700,marginBottom:8,letterSpacing:".08em"}}>
+                📅 경제지표 일정 · High/Medium
+                {fh.econ.length>0&&<span style={{color:T.green,marginLeft:6}}>● {fh.econ.length}건</span>}
+              </div>
+              {fh.econ.length===0&&!live.loading&&(
+                <div style={{color:T.muted,fontFamily:"JetBrains Mono",fontSize:9,lineHeight:1.8}}>경제 캘린더 데이터 없음</div>
+              )}
+              {fh.econ.map((e,i)=>{
+                const ic=e.impact==="High"?T.red:e.impact==="Medium"?T.orange:T.muted;
+                return(
+                  <div key={i} style={{padding:"8px 10px",background:T.panel,borderRadius:4,marginBottom:5,border:`1px solid ${ic}22`}}>
+                    <div style={{display:"flex",justifyContent:"space-between",marginBottom:2}}>
+                      <span style={{fontSize:8,color:ic,fontFamily:"JetBrains Mono",fontWeight:700}}>{e.impact}</span>
+                      <span style={{fontSize:7.5,color:T.muted,fontFamily:"JetBrains Mono"}}>{e.time||e.date}</span>
+                    </div>
+                    <div style={{fontSize:10,color:T.text,fontFamily:"Space Grotesk",fontWeight:600,marginBottom:3}}>{e.event}</div>
+                    <div style={{display:"flex",gap:8,fontSize:8,fontFamily:"JetBrains Mono",flexWrap:"wrap"}}>
+                      {e.country&&<span style={{color:T.accent}}>{e.country}</span>}
+                      {e.actual!=null&&<span style={{color:T.green}}>실제 {e.actual}</span>}
+                      {e.estimate!=null&&<span style={{color:T.muted}}>예측 {e.estimate}</span>}
+                      {e.prev!=null&&<span style={{color:T.dim}}>이전 {e.prev}</span>}
                     </div>
                   </div>
-                  {r.yields&&(()=>{
-                    const mn=Math.min(...r.yields)-.1,mx=Math.max(...r.yields)+.1,rng=mx-mn;const W=180,H=50;
-                    const pts=r.yields.map((v,i)=>`${(i/(r.yields.length-1))*W},${H-((v-mn)/rng)*(H-8)-4}`).join(" ");
-                    const inv=r.yields[5]<r.yields[2];
-                    return(
-                      <div>
-                        <svg width={W} height={H} style={{display:"block",marginBottom:4}}>
-                          <polyline points={pts} fill="none" stroke={inv?T.red:r.color} strokeWidth="1.5" strokeLinejoin="round"/>
-                          {r.yields.map((v,i)=>{const x=(i/(r.yields.length-1))*W,y=H-((v-mn)/rng)*(H-8)-4;return<circle key={i} cx={x} cy={y} r="2.5" fill={inv?T.red:r.color}/>;  })}
-                        </svg>
-                        <div style={{display:"flex",justifyContent:"space-between",marginBottom:3}}>
-                          {["1M","3M","6M","1Y","2Y","5Y","10Y","30Y"].map(t=><span key={t} style={{fontSize:6.5,color:T.dim,fontFamily:"JetBrains Mono"}}>{t}</span>)}
-                        </div>
-                        <div style={{fontSize:8,color:inv?T.red:T.green,fontFamily:"JetBrains Mono",fontWeight:700}}>{inv?"⚠️ 역전":"✅ 정상"} · 10Y: {r.rate10y}%</div>
-                      </div>
-                    );
-                  })()}
-                </div>
-              ))}
+                );
+              })}
             </div>
           </div>
         )}
+
         {tab==="calendar"&&<TV type="events" height="100%" opts={{importanceFilter:"0,1",countryFilter:"us,eu,jp,kr,cn,gb,br,au"}}/>}
       </div>
     </div>
@@ -1625,6 +1882,8 @@ function MarketsView(){
 
 
 /* ════════════════════════════════════════════════════════════════
+   TAB 6: API GUIDE
+════════════════════════════════════════════════════════════════ */
    TAB 6: API GUIDE
 ════════════════════════════════════════════════════════════════ */
 function ApiGuideView(){
@@ -1734,24 +1993,78 @@ function ApiGuideView(){
 function App(){
   const [tab,setTab]=useState("worldmap");
   const [clock,setClock]=useState(new Date());
+  // ── Live data state ──
+  const [live,setLive]=useState({loading:true,fredLive:false,avLive:false,fhLive:false,
+    fred:{},av:{},fh:{news:[],econ:[]},lastUpdated:null});
+
+  // Clock
   useEffect(()=>{const iv=setInterval(()=>setClock(new Date()),1000);return()=>clearInterval(iv);},[]);
+
+  // Fetch all live data on mount
+  useEffect(()=>{
+    (async()=>{
+      const updates={loading:false,lastUpdated:new Date()};
+
+      // ── FRED ────────────────────────────────────────────────
+      try{
+        const [fedRate,unemployment,cpi,gdpGrowth,rate2y,rate5y,rate10y,rate30y,rate1m,rate3m,rate6m,rate1y]=
+          await Promise.all([
+            fredVal("DFF"),fredVal("UNRATE"),fredCpiYoy(),fredVal("A191RL1Q225SBEA"),
+            fredVal("DGS2"),fredVal("DGS5"),fredVal("DGS10"),fredVal("DGS30"),
+            fredVal("DGS1MO"),fredVal("DGS3MO"),fredVal("DGS6MO"),fredVal("DGS1"),
+          ]);
+        const fredData={fedRate,unemployment,cpi,gdpGrowth,rate2y,rate5y,rate10y,rate30y};
+        // Build US yield curve array: 1M,3M,6M,1Y,2Y,5Y,10Y,30Y
+        const yields=[rate1m,rate3m,rate6m,rate1y,rate2y,rate5y,rate10y,rate30y].map(v=>v||0);
+        fredData.yields=yields;
+        updates.fred=fredData;
+        updates.fredLive=Object.values(fredData).some(v=>v!=null);
+      }catch(e){console.warn("FRED error",e);}
+
+      // ── Alpha Vantage ────────────────────────────────────────
+      try{
+        const [wti,natgas,copper]=await Promise.all([
+          avComm("WTI"),avComm("NATURAL_GAS"),avComm("COPPER"),
+        ]);
+        // Brent separate (might fail, non-blocking)
+        let brent=null;
+        try{brent=await avComm("BRENT");}catch{}
+        updates.av={wti,brent,natgas,copper};
+        updates.avLive=[wti,natgas,copper].some(v=>v!=null);
+      }catch(e){console.warn("AV error",e);}
+
+      // ── Finnhub ──────────────────────────────────────────────
+      try{
+        const [news,econ]=await Promise.all([fhNews(),fhEconCal()]);
+        updates.fh={news,econ};
+        updates.fhLive=news.length>0||econ.length>0;
+      }catch(e){console.warn("Finnhub error",e);}
+
+      setLive(prev=>({...prev,...updates}));
+    })();
+  },[]);
+
   const kst=new Date(clock.toLocaleString("en-US",{timeZone:"Asia/Seoul"}));
   const nyc=new Date(clock.toLocaleString("en-US",{timeZone:"America/New_York"}));
   const lon=new Date(clock.toLocaleString("en-US",{timeZone:"Europe/London"}));
   const nyO=nyc.getHours()>=9&&nyc.getHours()<16;
   const lonO=lon.getHours()>=8&&lon.getHours()<16;
   const kstO=kst.getHours()>=9&&kst.getHours()<15;
+  const liveCount=[live.fredLive,live.avLive,live.fhLive].filter(Boolean).length;
 
   const TABS=[
     {id:"worldmap", label:"🌍 글로벌 자금 지도",  sub:"9개 지역·자금흐름"},
     {id:"chain",    label:"🔗 매크로 연결고리",   sub:"중앙은행→시장 전달"},
     {id:"timeline", label:"📅 타임라인·스냅샷",   sub:"24M 시계열·CSV"},
     {id:"hedgefund",label:"🦁 헤지펀드 추적",     sub:"8대 펀드 포지션"},
-    {id:"markets",  label:"📊 글로벌 시장",       sub:"지수·FX·크립토·금리"},
+    {id:"markets",  label:"📊 글로벌 시장",       sub:"지수·FX·크립토·금리·뉴스"},
     {id:"apiguide", label:"📡 데이터 API 가이드", sub:"비용·가이드"},
   ];
 
+  const fredConnStr=live.fredLive?`FRED✅ AV${live.avLive?"✅":"❌"} FH${live.fhLive?"✅":"❌"}`:"연결중...";
+
   return(
+    <LiveCtx.Provider value={live}>
     <div style={{background:T.bg,height:"100vh",display:"flex",flexDirection:"column",fontFamily:"JetBrains Mono,monospace"}}>
 
       {/* ── 헤더 ── */}
@@ -1760,10 +2073,18 @@ function App(){
           <div style={{width:3,height:28,background:`linear-gradient(180deg,${T.accent},${T.purple})`,borderRadius:2}}/>
           <div>
             <span style={{fontFamily:"Space Grotesk",fontSize:17,fontWeight:700,color:T.accent,letterSpacing:".04em"}}>GLOBAL MACRO INTELLIGENCE</span>
-            <span style={{fontSize:8.5,color:T.muted,fontFamily:"JetBrains Mono",marginLeft:10}}>v1.0 · 9 Regions · 8 Hedge Funds · Bloomberg-Style</span>
+            <span style={{fontSize:8.5,color:T.muted,fontFamily:"JetBrains Mono",marginLeft:10}}>v2.0 · FRED+AV+Finnhub Live · 9 Regions · Bloomberg-Style</span>
           </div>
         </div>
-        <div style={{display:"flex",gap:16,fontSize:10,alignItems:"center"}}>
+        <div style={{display:"flex",gap:14,fontSize:10,alignItems:"center"}}>
+          {/* Live API status mini badges */}
+          <div style={{display:"flex",gap:4,fontSize:7.5,fontFamily:"JetBrains Mono"}}>
+            {[["FRED",live.fredLive,T.green],["AV",live.avLive,T.gold],["FH",live.fhLive,T.purple]].map(([n,on,c])=>(
+              <span key={n} style={{padding:"2px 6px",border:`1px solid ${on?c:T.dim}44`,borderRadius:2,color:on?c:T.dim}}>
+                {on?"●":"○"} {n}
+              </span>
+            ))}
+          </div>
           <span className="mono">KST <span style={{color:kstO?T.green:T.accent,fontWeight:700}}>{kst.toLocaleTimeString("ko-KR",{hour12:false})}</span>{kstO&&<span style={{color:T.green,fontSize:7,marginLeft:3}}>OPEN</span>}</span>
           <span className="mono">LON <span style={{color:lonO?T.green:T.gold,fontWeight:700}}>{lon.toLocaleTimeString("en-GB",{hour12:false})}</span></span>
           <span className="mono">NYC <span style={{color:nyO?T.green:T.gold,fontWeight:700}}>{nyc.toLocaleTimeString("en-US",{hour12:false})}</span></span>
@@ -1811,10 +2132,13 @@ function App(){
 
       {/* ── 푸터 ── */}
       <div style={{height:22,background:"#02040a",borderTop:`1px solid ${T.border}`,display:"flex",alignItems:"center",justifyContent:"space-between",padding:"0 14px",flexShrink:0}}>
-        <span style={{fontSize:7.5,color:T.dim,fontFamily:"JetBrains Mono"}}>TradingView · CoinGecko · ExchangeRate-API (실시간) · 자금흐름·헤지펀드: 모델/추정 데이터 · 투자 참고용</span>
-        <span style={{fontSize:7.5,color:T.muted,fontFamily:"JetBrains Mono"}}>GLOBAL MACRO INTELLIGENCE v1.0 · Made for 최윤준 · {new Date().getFullYear()}</span>
+        <span style={{fontSize:7.5,color:T.dim,fontFamily:"JetBrains Mono"}}>
+          FRED · Alpha Vantage · Finnhub · CoinGecko · ExchangeRate-API · TradingView (실시간) · 자금흐름·헤지펀드: 모델/추정 · 투자 참고용
+        </span>
+        <span style={{fontSize:7.5,color:T.muted,fontFamily:"JetBrains Mono"}}>GLOBAL MACRO INTELLIGENCE v2.0 · 최윤준 · {new Date().getFullYear()}</span>
       </div>
     </div>
+    </LiveCtx.Provider>
   );
 }
 
