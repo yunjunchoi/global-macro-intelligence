@@ -440,15 +440,18 @@ function Badge({children,color}){
 /* ════════════════════════════════════════════════════════════════
    TAB 1: WORLD MAP — 9개 지역 + 자금흐름
 ════════════════════════════════════════════════════════════════ */
+/* ════════════════════════════════════════════════════════════════
+   TAB 1: WORLD MAP v2 — 자금 흐름 라인 강화 + 인사이트 패널
+════════════════════════════════════════════════════════════════ */
 function WorldMapView(){
   const [moIdx,setMoIdx]=useState(MONTHS.length-1);
   const [playing,setPlaying]=useState(false);
   const [speed,setSpeed]=useState(1.0);
   const [selRegion,setSelRegion]=useState(null);
   const [hover,setHover]=useState(null);
+  const [viewMode,setViewMode]=useState("map"); // "map" | "flowlines" | "sankey"
   const [tick,setTick]=useState(0);
   const playRef=useRef(null);
-  const pRef=useRef([]);
 
   useEffect(()=>{if(playing){playRef.current=setInterval(()=>setMoIdx(m=>(m+1)%MONTHS.length),Math.round(1000/speed));}return()=>clearInterval(playRef.current);},[playing,speed]);
   useEffect(()=>{const iv=setInterval(()=>setTick(t=>t+1),55);return()=>clearInterval(iv);},[]);
@@ -456,16 +459,17 @@ function WorldMapView(){
   const flows=useMemo(()=>FLOWS.map(f=>({...f,amt:f.amounts[moIdx]})),[moIdx]);
   const maxAmt=useMemo(()=>Math.max(...flows.map(f=>f.amt)),[flows]);
   const curMo=MONTHS[moIdx];
+  const totalFlow=flows.reduce((s,f)=>s+f.amt,0);
 
   // Particle system
   const particles=useRef([]);
   useEffect(()=>{
     particles.current=flows.flatMap((f,fi)=>{
-      const cnt=f.tier==="xl"?14:f.tier==="lg"?9:f.tier==="md"?6:4;
+      const cnt=f.tier==="xl"?12:f.tier==="lg"?8:f.tier==="md"?5:3;
       const normW=f.amt/maxAmt;
       return Array.from({length:Math.round(cnt*(0.4+normW*.8))},(_,i)=>({
         id:`${fi}-${i}-${moIdx}`,from:f.from,to:f.to,color:f.color,
-        speed:(.04+Math.random()*.08)*speed*(0.5+normW*.7),
+        speed:(.035+Math.random()*.07)*speed*(0.5+normW*.7),
         maxR:(f.tier==="xl"?7:f.tier==="lg"?5:f.tier==="md"?3.5:2.2)*(0.5+normW*.6),
         startProg:Math.random(),opacity:.5+normW*.45,
       }));
@@ -477,216 +481,926 @@ function WorldMapView(){
   function FloatParticle({p}){
     const prog=useRef(p.startProg);const[pos,setPos]=useState(p.startProg);
     useEffect(()=>{let raf,last=performance.now();const t=now=>{prog.current=(prog.current+(now-last)/1000*p.speed)%1;last=now;setPos(prog.current);raf=requestAnimationFrame(t);};raf=requestAnimationFrame(t);return()=>cancelAnimationFrame(raf);},[p.speed]);
-    const f=nodePos(p.from),t=nodePos(p.to);
-    const cx=f.x+(t.x-f.x)*pos,cy=f.y+(t.y-f.y)*pos;
+    const f=nodePos(p.from),t2=nodePos(p.to);
+    const cx=f.x+(t2.x-f.x)*pos,cy=f.y+(t2.y-f.y)*pos;
     const r=p.maxR*(0.3+(1-Math.abs(pos-.5)*2)*.7);
     return <circle cx={`${cx*100}%`} cy={`${cy*100}%`} r={r} fill={p.color} opacity={p.opacity*(0.3+pos*.7)}/>;
   }
 
-  const tierW={xl:4.5,lg:3.2,md:2.0,sm:1.2};
+  // FLOW LINES VIEW — 대형 라인 + 레이블
+  function FlowLinesView(){
+    const sorted=[...flows].sort((a,b)=>b.amt-a.amt);
+    const max=sorted[0]?.amt||1;
+    const W=900,H=480;
+    const tierColor={xl:"#00d4ff",lg:"#f0b429",md:"#00e676",sm:"#bb86fc"};
+
+    return(
+      <div style={{flex:1,display:"flex",flexDirection:"column",overflow:"hidden"}}>
+        <svg width="100%" height="100%" viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="xMidYMid meet" style={{display:"block"}}>
+          <defs>
+            <radialGradient id="flBg" cx="50%" cy="50%" r="70%"><stop offset="0%" stopColor="#060c18"/><stop offset="100%" stopColor="#04060d"/></radialGradient>
+            <filter id="flGlow"><feGaussianBlur stdDeviation="5" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+          </defs>
+          <rect width={W} height={H} fill="url(#flBg)"/>
+
+          {/* 격자 */}
+          {Array.from({length:9},(_,i)=><line key={i} x1={(i+1)*90} y1="0" x2={(i+1)*90} y2={H} stroke="#0a1428" strokeWidth=".5"/>)}
+          {Array.from({length:5},(_,i)=><line key={i} x1="0" y1={(i+1)*80} x2={W} y2={(i+1)*80} stroke="#0a1428" strokeWidth=".5"/>)}
+
+          {/* 중앙 세로선: 기준 구분 */}
+          <line x1={W/2} y1="20" x2={W/2} y2={H-20} stroke="#1c3050" strokeWidth="1" strokeDasharray="6 4"/>
+          <text x={W/2} y="16" textAnchor="middle" fill="#1c3050" fontSize="9" fontFamily="JetBrains Mono">자금 흐름 기준선</text>
+
+          {/* 각 흐름 수평 바 형식 — 왼쪽=출발지, 오른쪽=도착지 */}
+          {sorted.map((f,i)=>{
+            const fr=REGIONS.find(r=>r.id===f.from),tr=REGIONS.find(r=>r.id===f.to);
+            if(!fr||!tr)return null;
+            const y=30+i*(H-60)/Math.min(sorted.length,14);
+            const barW=(f.amt/max)*(W*.36);
+            const cx=W/2;
+            const col=f.color;
+            const isH=hover===`${f.from}-${f.to}`;
+            const lw=isH?Math.max((f.amt/max)*22,8):Math.max((f.amt/max)*16,4);
+            const prev=moIdx>0?f.amounts[moIdx-1]:f.amounts[0];const delta=f.amt-prev;
+            if(i>=14)return null;
+            return(
+              <g key={`${f.from}-${f.to}`}
+                onMouseEnter={()=>setHover(`${f.from}-${f.to}`)}
+                onMouseLeave={()=>setHover(null)}>
+                {/* 글로우 */}
+                {isH&&<line x1={cx-barW} y1={y+lw/2} x2={cx} y2={y+lw/2} stroke={col} strokeWidth={lw*2.5} strokeOpacity=".08" filter="url(#flGlow)" strokeLinecap="round"/>}
+                {/* 메인 라인 */}
+                <line x1={cx-barW} y1={y+lw/2} x2={cx} y2={y+lw/2}
+                  stroke={col} strokeWidth={lw} strokeOpacity={isH?.95:.55+(f.amt/max)*.35} strokeLinecap="round"/>
+                {/* 화살표 끝 */}
+                <polygon points={`${cx+2},${y+lw/2} ${cx-12},${y} ${cx-12},${y+lw}`} fill={col} opacity={isH?1:.7}/>
+                {/* 출발 레이블 */}
+                <text x={cx-barW-6} y={y+lw/2+4} textAnchor="end" fill={fr.color} fontSize={isH?10:9} fontWeight="700" fontFamily="JetBrains Mono">{fr.flag} {fr.name}</text>
+                {/* 도착 레이블 */}
+                <text x={cx+18} y={y+lw/2+4} textAnchor="start" fill={tr.color} fontSize={isH?10:9} fontWeight="700" fontFamily="JetBrains Mono">{tr.flag} {tr.name}</text>
+                {/* 금액 */}
+                <text x={cx-barW/2} y={y+lw/2-(lw/2+4)} textAnchor="middle" fill={col} fontSize={isH?11:9} fontWeight="700" fontFamily="JetBrains Mono">${f.amt}B</text>
+                {/* 변화량 */}
+                <text x={cx-barW/2} y={y+lw/2+(lw/2+12)} textAnchor="middle" fill={delta>=0?T.green:T.red} fontSize="8" fontFamily="JetBrains Mono">{delta>=0?"▲":"▼"}${Math.abs(delta)}B</text>
+                {/* 레이블 */}
+                {isH&&<text x={cx-barW/2} y={y+lw/2+4} textAnchor="middle" fill="#fff" fontSize="8" fontFamily="JetBrains Mono" opacity=".8">{f.label}</text>}
+                {/* 티어 배지 */}
+                <rect x={cx-barW-62} y={y} width={22} height={12} rx="2" fill={tierColor[f.tier]+"30"} stroke={tierColor[f.tier]+"66"}/>
+                <text x={cx-barW-51} y={y+9} textAnchor="middle" fill={tierColor[f.tier]} fontSize="7.5" fontWeight="700" fontFamily="JetBrains Mono">{f.tier.toUpperCase()}</text>
+              </g>
+            );
+          })}
+
+          {/* 범례 */}
+          <rect x={W-120} y="10" width="110" height="60" rx="3" fill="#04060d" opacity=".9"/>
+          <text x={W-65} y="25" textAnchor="middle" fill={T.muted} fontSize="8.5" fontFamily="JetBrains Mono" fontWeight="700">TIER 범례</text>
+          {[["XL",">$200B","#00d4ff"],["LG","$100~200B","#f0b429"],["MD","$50~100B","#00e676"],["SM","<$50B","#bb86fc"]].map(([t,rng,c],i)=>(
+            <g key={t} transform={`translate(${W-118},${32+i*9})`}>
+              <rect x="0" y="0" width="18" height="7" rx="1.5" fill={c} opacity=".6"/>
+              <text x="22" y="7" fill={c} fontSize="7.5" fontFamily="JetBrains Mono">{t}: {rng}</text>
+            </g>
+          ))}
+        </svg>
+      </div>
+    );
+  }
+
+  // SANKEY (지역별 순유출입 비교)
+  function SankeyView(){
+    const regionStats=REGIONS.map(r=>({
+      ...r,
+      inflow:flows.filter(f=>f.to===r.id).reduce((s,f)=>s+f.amt,0),
+      outflow:flows.filter(f=>f.from===r.id).reduce((s,f)=>s+f.amt,0),
+    })).map(r=>({...r,net:r.inflow-r.outflow}));
+    const maxVal=Math.max(...regionStats.map(r=>Math.max(r.inflow,r.outflow)));
+
+    return(
+      <div style={{flex:1,overflowY:"auto",padding:"12px 16px"}}>
+        <div style={{fontSize:9,color:T.muted,fontFamily:"JetBrains Mono",fontWeight:700,marginBottom:10,letterSpacing:".1em"}}>
+          지역별 자금 유출입 비교 · {curMo.label}
+        </div>
+        {regionStats.map(r=>{
+          const inW=(r.inflow/maxVal)*100,outW=(r.outflow/maxVal)*100;
+          const net=r.net;
+          return(
+            <div key={r.id} style={{marginBottom:10,padding:"10px 12px",background:T.panel,borderRadius:5,border:`1px solid ${r.color}33`}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
+                <div style={{display:"flex",alignItems:"center",gap:8}}>
+                  <span style={{fontSize:18}}>{r.flag}</span>
+                  <span style={{fontSize:12,color:r.color,fontWeight:700,fontFamily:"Space Grotesk"}}>{r.name}</span>
+                </div>
+                <span style={{fontSize:13,fontWeight:700,color:net>0?T.green:T.red,fontFamily:"JetBrains Mono"}}>
+                  {net>0?"+":""}${Math.round(net)}B 순{net>0?"유입":"유출"}
+                </span>
+              </div>
+              <div style={{marginBottom:4}}>
+                <div style={{display:"flex",justifyContent:"space-between",marginBottom:2}}>
+                  <span style={{fontSize:8,color:T.green,fontFamily:"JetBrains Mono"}}>유입 ${r.inflow}B</span>
+                  <span style={{fontSize:8,color:T.red,fontFamily:"JetBrains Mono"}}>유출 ${r.outflow}B</span>
+                </div>
+                <div style={{position:"relative",height:14,background:T.dim,borderRadius:7,overflow:"hidden"}}>
+                  <div style={{position:"absolute",left:0,top:0,width:`${inW}%`,height:"100%",background:`linear-gradient(90deg,${T.green}99,${T.green})`,borderRadius:"7px 0 0 7px",display:"flex",alignItems:"center",justifyContent:"flex-end",paddingRight:4}}>
+                    {inW>15&&<span style={{fontSize:7,color:"#fff",fontWeight:700,fontFamily:"JetBrains Mono"}}>${r.inflow}B</span>}
+                  </div>
+                  <div style={{position:"absolute",left:`${inW}%`,top:0,width:`${outW*(100-inW)/100}%`,height:"100%",background:`linear-gradient(90deg,${T.red}99,${T.red})`,display:"flex",alignItems:"center",justifyContent:"flex-end",paddingRight:4}}>
+                    {outW>20&&<span style={{fontSize:7,color:"#fff",fontWeight:700,fontFamily:"JetBrains Mono"}}>${r.outflow}B</span>}
+                  </div>
+                </div>
+              </div>
+              <div style={{display:"flex",flexWrap:"wrap",gap:4,marginTop:4}}>
+                {flows.filter(f=>f.to===r.id).slice(0,3).map((f,i)=>{
+                  const fr2=REGIONS.find(x=>x.id===f.from);
+                  return<span key={i} style={{fontSize:7,color:T.green,background:T.green+"12",padding:"1px 6px",borderRadius:2,fontFamily:"JetBrains Mono"}}>← {fr2?.name} ${f.amt}B</span>;
+                })}
+                {flows.filter(f=>f.from===r.id).slice(0,3).map((f,i)=>{
+                  const tr2=REGIONS.find(x=>x.id===f.to);
+                  return<span key={i} style={{fontSize:7,color:T.red,background:T.red+"12",padding:"1px 6px",borderRadius:2,fontFamily:"JetBrains Mono"}}>→ {tr2?.name} ${f.amt}B</span>;
+                })}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    );
+  }
 
   return(
     <div style={{display:"flex",flexDirection:"column",height:"100%"}}>
       {/* 컨트롤 바 */}
-      <div style={{padding:"8px 14px",background:T.panel2,borderBottom:`1px solid ${T.border}`,display:"flex",alignItems:"center",gap:12,flexWrap:"wrap"}}>
-        <button onClick={()=>setPlaying(p=>!p)} style={{width:32,height:32,borderRadius:"50%",border:`1px solid ${playing?T.accent:T.border}`,background:playing?T.accent+"20":"transparent",color:playing?T.accent:T.muted,fontSize:12,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>
-          {playing?"⏸":"▶"}
-        </button>
-        <div style={{flex:1,minWidth:180}}>
-          <div style={{display:"flex",justifyContent:"space-between",marginBottom:3}}>
-            {MONTHS.filter((_,i)=>i%4===0).map((m,i)=><span key={i} style={{fontSize:7.5,color:T.muted,fontFamily:"JetBrains Mono"}}>{m.label.slice(2)}</span>)}
-          </div>
-          <input type="range" min="0" max={MONTHS.length-1} value={moIdx} onChange={e=>{setMoIdx(+e.target.value);setPlaying(false);}}/>
+      <div style={{padding:"7px 14px",background:T.panel2,borderBottom:`1px solid ${T.border}`,display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>
+        {/* 뷰 모드 */}
+        <div style={{display:"flex",gap:3,flexShrink:0}}>
+          <button className={`btn${viewMode==="map"?" a":""}`} onClick={()=>setViewMode("map")}>🗺 세계지도</button>
+          <button className={`btn${viewMode==="flowlines"?" ga":""}`} onClick={()=>setViewMode("flowlines")}>📏 자금흐름 라인</button>
+          <button className={`btn${viewMode==="sankey"?" pa":""}`} onClick={()=>setViewMode("sankey")}>⚖ 유출입 비교</button>
         </div>
-        <div style={{textAlign:"center",flexShrink:0}}>
-          <div style={{fontSize:14,fontWeight:700,color:T.accent,fontFamily:"Space Grotesk"}}>{curMo.label}</div>
-          <div style={{fontSize:8,color:T.muted,fontFamily:"JetBrains Mono"}}>
-            총 흐름: <span style={{color:T.gold,fontWeight:700}}>${(flows.reduce((s,f)=>s+f.amt,0)/1000).toFixed(2)}T</span>
+        <div style={{width:1,height:20,background:T.border,flexShrink:0}}/>
+        {/* 재생 */}
+        {viewMode!=="sankey"&&<>
+          <button onClick={()=>setPlaying(p=>!p)} style={{width:28,height:28,borderRadius:"50%",border:`1px solid ${playing?T.accent:T.border}`,background:playing?T.accent+"20":"transparent",color:playing?T.accent:T.muted,fontSize:11,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>
+            {playing?"⏸":"▶"}
+          </button>
+          <div style={{flex:1,minWidth:160}}>
+            <div style={{display:"flex",justifyContent:"space-between",marginBottom:2}}>
+              {MONTHS.filter((_,i)=>i%6===0).map((m,i)=><span key={i} style={{fontSize:7,color:T.dim,fontFamily:"JetBrains Mono"}}>{m.label}</span>)}
+            </div>
+            <input type="range" min="0" max={MONTHS.length-1} value={moIdx} onChange={e=>{setMoIdx(+e.target.value);setPlaying(false);}}/>
           </div>
-        </div>
-        <div style={{flexShrink:0,minWidth:90}}>
-          <div style={{display:"flex",justifyContent:"space-between",fontSize:8,color:T.muted,fontFamily:"JetBrains Mono",marginBottom:2}}>
-            <span>속도</span><span style={{color:T.gold}}>{speed.toFixed(1)}×</span>
+          <div style={{flexShrink:0}}>
+            <div style={{fontSize:14,fontWeight:700,color:T.accent,fontFamily:"Space Grotesk"}}>{curMo.label}</div>
+            <div style={{fontSize:7.5,color:T.muted,fontFamily:"JetBrains Mono"}}>총 ${(totalFlow/1000).toFixed(2)}T</div>
           </div>
-          <input type="range" className="gold" min=".3" max="5" step=".1" value={speed} onChange={e=>setSpeed(+e.target.value)}/>
+          <div style={{flexShrink:0,minWidth:80}}>
+            <div style={{display:"flex",justifyContent:"space-between",fontSize:7.5,color:T.muted,fontFamily:"JetBrains Mono",marginBottom:2}}>
+              <span>속도</span><span style={{color:T.gold}}>{speed.toFixed(1)}×</span>
+            </div>
+            <input type="range" min=".3" max="5" step=".1" value={speed} onChange={e=>setSpeed(+e.target.value)}/>
+          </div>
+        </>}
+        {/* 요약 */}
+        <div style={{marginLeft:"auto",display:"flex",gap:12,fontSize:8.5,fontFamily:"JetBrains Mono"}}>
+          <span>최대유입: <span style={{color:T.green,fontWeight:700}}>{REGIONS.reduce((a,r)=>{const v=flows.filter(f=>f.to===r.id).reduce((s,f)=>s+f.amt,0);return v>a.v?{n:r.name,v}:a;},{n:"",v:0}).n}</span></span>
+          <span>최대유출: <span style={{color:T.red,fontWeight:700}}>{REGIONS.reduce((a,r)=>{const v=flows.filter(f=>f.from===r.id).reduce((s,f)=>s+f.amt,0);return v>a.v?{n:r.name,v}:a;},{n:"",v:0}).n}</span></span>
         </div>
       </div>
 
-      <div style={{flex:1,display:"flex",minHeight:0}}>
-        {/* 지도 */}
-        <div style={{flex:1,position:"relative",overflow:"hidden"}}>
-          <svg width="100%" height="100%" viewBox="0 0 960 490" preserveAspectRatio="xMidYMid meet" style={{display:"block"}}>
-            <defs>
-              <radialGradient id="bgG" cx="50%" cy="45%" r="70%">
-                <stop offset="0%" stopColor="#080e20"/><stop offset="100%" stopColor="#04060d"/>
-              </radialGradient>
-              <filter id="glow"><feGaussianBlur stdDeviation="3.5" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
-              <filter id="glowXL"><feGaussianBlur stdDeviation="6" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
-              <filter id="nodeglow"><feGaussianBlur stdDeviation="8" in="SourceGraphic" result="b"/><feComposite in="SourceGraphic" in2="b" operator="over"/></filter>
-            </defs>
-            <rect width="960" height="490" fill="url(#bgG)"/>
-            {/* 격자 */}
-            {[120,240,360,480,600,720,840].map(v=><line key={`gv${v}`} x1={v} y1="0" x2={v} y2="490" stroke="#0a1428" strokeWidth=".5"/>)}
-            {[98,196,294,392].map(v=><line key={`gh${v}`} x1="0" y1={v} x2="960" y2={v} stroke="#0a1428" strokeWidth=".5"/>)}
-            {/* 대륙 */}
-            {MAP_PATHS.map((p,i)=><path key={i} d={p.d} fill={p.fill} stroke={p.stroke} strokeWidth=".8" opacity=".9"/>)}
-            {/* 적도 */}
-            <line x1="0" y1="245" x2="960" y2="245" stroke="#122040" strokeWidth=".8" strokeDasharray="8 8" opacity=".6"/>
-
-            {/* 자금흐름 엣지 */}
-            {flows.map(f=>{
+      {viewMode==="sankey"&&<SankeyView/>}
+      {viewMode==="flowlines"&&(
+        <div style={{flex:1,display:"flex",overflow:"hidden"}}>
+          <FlowLinesView/>
+          {/* 인사이트 사이드 */}
+          <div style={{width:230,borderLeft:`1px solid ${T.border}`,overflowY:"auto",background:T.panel2,padding:"10px"}}>
+            <div style={{fontSize:9,color:T.muted,fontFamily:"JetBrains Mono",fontWeight:700,marginBottom:8,letterSpacing:".1em"}}>💡 FLOW INSIGHTS</div>
+            {[...flows].sort((a,b)=>b.amt-a.amt).slice(0,8).map((f,i)=>{
               const fr=REGIONS.find(r=>r.id===f.from),tr=REGIONS.find(r=>r.id===f.to);
-              if(!fr||!tr)return null;
-              const x1=fr.mapX*960,y1=fr.mapY*490,x2=tr.mapX*960,y2=tr.mapY*490;
-              const mx=(x1+x2)/2+(y2-y1)*.22,my=(y1+y2)/2-(x2-x1)*.22;
-              const dPath=`M${x1},${y1} Q${mx},${my} ${x2},${y2}`;
-              const w=tierW[f.tier]*(0.4+(f.amt/maxAmt)*.9);
-              const isH=hover===`${f.from}-${f.to}`;
+              const prev=moIdx>0?f.amounts[moIdx-1]:f.amounts[0];
+              const delta=f.amt-prev,chg=((delta/prev)*100).toFixed(1);
               return(
-                <g key={`${f.from}-${f.to}`}
-                  onMouseEnter={()=>setHover(`${f.from}-${f.to}`)}
-                  onMouseLeave={()=>setHover(null)}
-                  style={{cursor:"pointer"}}>
-                  {(f.tier==="xl"||isH)&&<path d={dPath} stroke={f.color} strokeWidth={w*4} strokeOpacity=".06" fill="none" filter="url(#glowXL)"/>}
-                  <path d={dPath} stroke={isH?f.color:f.color} strokeWidth={w}
-                    strokeOpacity={isH?.95:.2+(f.amt/maxAmt)*.5} fill="none"
-                    strokeDasharray={f.tier==="xl"?"none":f.tier==="lg"?"10 4":"6 6"}/>
-                  <text x={mx} y={my} textAnchor="middle" dy="-7"
-                    fill={f.color} fontSize={isH?10:9} fontWeight="700" fontFamily="JetBrains Mono" opacity={isH?1:.8}
-                    filter={f.tier==="xl"||isH?"url(#glow)":"none"}>
-                    ${f.amt}B
-                  </text>
-                  {isH&&<text x={mx} y={my} textAnchor="middle" dy="5" fill="#fff" fontSize="8" fontFamily="JetBrains Mono" opacity=".75">{f.label}</text>}
-                </g>
+                <div key={i} style={{padding:"8px 9px",background:T.panel,borderRadius:4,marginBottom:5,border:`1px solid ${f.color}33`}}>
+                  <div style={{display:"flex",justifyContent:"space-between",marginBottom:2}}>
+                    <span style={{fontSize:8.5,color:f.color,fontWeight:700,fontFamily:"JetBrains Mono"}}>{fr?.name}→{tr?.name}</span>
+                    <span style={{fontSize:9,color:delta>=0?T.green:T.red,fontFamily:"JetBrains Mono",fontWeight:700}}>{delta>=0?"▲":"▼"}{Math.abs(chg)}%</span>
+                  </div>
+                  <div style={{fontSize:13,color:T.text,fontWeight:700,fontFamily:"JetBrains Mono",marginBottom:2}}>${f.amt}B</div>
+                  <div style={{height:2,background:T.dim,borderRadius:1}}><div style={{width:`${(f.amt/flows[0]?.amt||1)*100}%`,height:"100%",background:f.color}}/></div>
+                  <div style={{fontSize:7,color:T.dim,fontFamily:"JetBrains Mono",marginTop:3}}>{f.label}</div>
+                </div>
               );
             })}
+          </div>
+        </div>
+      )}
+      {viewMode==="map"&&(
+        <div style={{flex:1,display:"flex",minHeight:0}}>
+          {/* 지도 */}
+          <div style={{flex:1,position:"relative",overflow:"hidden"}}>
+            <svg width="100%" height="100%" viewBox="0 0 960 490" preserveAspectRatio="xMidYMid meet" style={{display:"block"}}>
+              <defs>
+                <radialGradient id="bgG" cx="50%" cy="45%" r="70%">
+                  <stop offset="0%" stopColor="#080e20"/><stop offset="100%" stopColor="#04060d"/>
+                </radialGradient>
+                <filter id="glow"><feGaussianBlur stdDeviation="3.5" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+                <filter id="glowXL"><feGaussianBlur stdDeviation="6" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+                <filter id="nodeglow"><feGaussianBlur stdDeviation="8" in="SourceGraphic" result="b"/><feComposite in="SourceGraphic" in2="b" operator="over"/></filter>
+              </defs>
+              <rect width="960" height="490" fill="url(#bgG)"/>
+              {[120,240,360,480,600,720,840].map(v=><line key={`gv${v}`} x1={v} y1="0" x2={v} y2="490" stroke="#0a1428" strokeWidth=".5"/>)}
+              {[98,196,294,392].map(v=><line key={`gh${v}`} x1="0" y1={v} x2="960" y2={v} stroke="#0a1428" strokeWidth=".5"/>)}
+              {MAP_PATHS.map((p,i)=><path key={i} d={p.d} fill={p.fill} stroke={p.stroke} strokeWidth=".8" opacity=".9"/>)}
+              <line x1="0" y1="245" x2="960" y2="245" stroke="#122040" strokeWidth=".8" strokeDasharray="8 8" opacity=".6"/>
 
-            {/* 파티클 */}
-            {particles.current.map(p=><FloatParticle key={p.id} p={p}/>)}
+              {/* 자금흐름 — 두께 대폭 강화 + 레이블 항상 표시 */}
+              {flows.map(f=>{
+                const fr=REGIONS.find(r=>r.id===f.from),tr=REGIONS.find(r=>r.id===f.to);
+                if(!fr||!tr)return null;
+                const x1=fr.mapX*960,y1=fr.mapY*490,x2=tr.mapX*960,y2=tr.mapY*490;
+                const mx=(x1+x2)/2+(y2-y1)*.22,my=(y1+y2)/2-(x2-x1)*.22;
+                const dPath=`M${x1},${y1} Q${mx},${my} ${x2},${y2}`;
+                const normW=f.amt/maxAmt;
+                // v2: 두께를 훨씬 크게
+                const baseW={xl:10,lg:7,md:4.5,sm:2.5}[f.tier];
+                const w=baseW*(0.5+normW*.8);
+                const isH=hover===`${f.from}-${f.to}`;
+                const isSel=selRegion&&(f.from===selRegion||f.to===selRegion);
+                const active=!selRegion||isSel;
+                return(
+                  <g key={`${f.from}-${f.to}`}
+                    onMouseEnter={()=>setHover(`${f.from}-${f.to}`)}
+                    onMouseLeave={()=>setHover(null)}
+                    onClick={()=>{}}
+                    style={{cursor:"pointer"}}>
+                    {/* 글로우 레이어 */}
+                    {(active)&&<path d={dPath} stroke={f.color} strokeWidth={w*3.5} strokeOpacity={isH?.18:.05+(normW*.06)} fill="none" filter="url(#glowXL)"/>}
+                    {/* 메인 라인 */}
+                    <path d={dPath} stroke={f.color} strokeWidth={active?w:w*.3}
+                      strokeOpacity={isH?.98:active?.45+(normW*.45):.06} fill="none"
+                      strokeLinecap="round"/>
+                    {/* 티어 XL/LG는 항상 금액 레이블 표시 */}
+                    {(f.tier==="xl"||(f.tier==="lg"&&active)||isH)&&(
+                      <g>
+                        <rect x={mx-22} y={my-15} width="44" height="14" rx="3" fill="#040810" opacity=".88"/>
+                        <text x={mx} y={my-4} textAnchor="middle" fill={f.color} fontSize={isH?11:9.5} fontWeight="700" fontFamily="JetBrains Mono" filter={f.tier==="xl"?"url(#glow)":"none"}>
+                          ${f.amt}B
+                        </text>
+                      </g>
+                    )}
+                    {(f.tier==="md"&&active||isH)&&(
+                      <text x={mx} y={my-6} textAnchor="middle" fill={f.color} fontSize="8.5" fontWeight="700" fontFamily="JetBrains Mono" opacity=".85">${f.amt}B</text>
+                    )}
+                    {isH&&<text x={mx} y={my+7} textAnchor="middle" fill="#c8d4e0" fontSize="8" fontFamily="JetBrains Mono" opacity=".85">{f.label}</text>}
+                  </g>
+                );
+              })}
 
-            {/* 지역 노드 */}
-            {REGIONS.map(r=>{
-              const px=r.mapX*960,py=r.mapY*490;
-              const pulse=Math.sin(tick*.055+r.mapX*9)*.12+.88;
+              {/* 파티클 */}
+              {particles.current.map(p=><FloatParticle key={p.id} p={p}/>)}
+
+              {/* 지역 노드 */}
+              {REGIONS.map(r=>{
+                const px=r.mapX*960,py=r.mapY*490;
+                const pulse=Math.sin(tick*.055+r.mapX*9)*.1+.9;
+                const inFlow=flows.filter(f=>f.to===r.id).reduce((s,f)=>s+f.amt,0);
+                const outFlow=flows.filter(f=>f.from===r.id).reduce((s,f)=>s+f.amt,0);
+                const net=inFlow-outFlow;
+                const isSel=selRegion===r.id;
+                const nc=net>40?T.green:net<-40?T.red:r.color;
+                return(
+                  <g key={r.id} onClick={()=>setSelRegion(p=>p===r.id?null:r.id)} style={{cursor:"pointer"}}>
+                    <circle cx={px} cy={py} r={r.mapR*pulse*1.2} fill={r.color} opacity=".04"/>
+                    {isSel&&<circle cx={px} cy={py} r={r.mapR*.85} fill="none" stroke={r.color} strokeWidth="2.5" opacity=".6" strokeDasharray="5 3"/>}
+                    <circle cx={px} cy={py} r={r.mapR*.55} fill={r.color} opacity=".08" filter="url(#nodeglow)"/>
+                    <circle cx={px} cy={py} r={r.mapR*.43} fill={T.panel2} stroke={r.color} strokeWidth={isSel?2.5:1.8} strokeOpacity={isSel?1:.75}/>
+                    <text x={px} y={py-3} textAnchor="middle" fill={r.color} fontSize={r.mapR*.22+6} fontWeight="700" fontFamily="JetBrains Mono">{r.flag}</text>
+                    <text x={px} y={py+10} textAnchor="middle" fill={r.color} fontSize="9.5" fontWeight="700" fontFamily="JetBrains Mono">{r.name}</text>
+                    <text x={px} y={py+22} textAnchor="middle" fill={nc} fontSize="9" fontWeight="700" fontFamily="JetBrains Mono">
+                      {net>10?`+${Math.round(net)}B`:net<-10?`${Math.round(net)}B`:""}
+                    </text>
+                  </g>
+                );
+              })}
+
+              {/* 범례 */}
+              <rect x="6" y="6" width="140" height="64" rx="4" fill="#04060d" opacity=".93"/>
+              <text x="14" y="21" fill={T.muted} fontSize="9.5" fontFamily="JetBrains Mono" fontWeight="700">자금 규모 (두께)</text>
+              {[["XL",">$200B","#ff3355",10],["LG","$100~200B","#ff9800",7],["MD","$50~100B","#f0b429",4.5],["SM","<$50B","#00e676",2.5]].map(([tier,rng,col,w],i)=>(
+                <g key={tier} transform={`translate(10,${30+i*10})`}>
+                  <line x1="0" y1="4" x2="26" y2="4" stroke={col} strokeWidth={w} opacity=".85" strokeLinecap="round"/>
+                  <text x="32" y="8" fill={col} fontSize="8.5" fontFamily="JetBrains Mono">{tier}: {rng}</text>
+                </g>
+              ))}
+            </svg>
+          </div>
+
+          {/* 사이드 패널 */}
+          <div style={{width:240,borderLeft:`1px solid ${T.border}`,overflowY:"auto",background:T.panel2}}>
+            {selRegion?(()=>{
+              const r=REGIONS.find(x=>x.id===selRegion);if(!r)return null;
+              const rFlows=flows.filter(f=>f.from===r.id||f.to===r.id).sort((a,b)=>b.amt-a.amt);
               const inFlow=flows.filter(f=>f.to===r.id).reduce((s,f)=>s+f.amt,0);
               const outFlow=flows.filter(f=>f.from===r.id).reduce((s,f)=>s+f.amt,0);
-              const net=inFlow-outFlow;
-              const isSel=selRegion===r.id;
-              const nc=net>40?T.green:net<-40?T.red:r.color;
+              const hs=Math.min(100,Math.max(0,Math.round(
+                (r.gdpGrowth>2?12:r.gdpGrowth>0?5:-8)+
+                (r.cpi<2.5&&r.cpi>0?10:r.cpi<4?4:-8)+
+                (r.unemploy<4?12:r.unemploy<6?5:-6)+
+                (r.pmi>52?10:r.pmi>50?4:-5)+
+                (r.currentAcct>0?8:-4)+50
+              )));
               return(
-                <g key={r.id} onClick={()=>setSelRegion(p=>p===r.id?null:r.id)} style={{cursor:"pointer"}}>
-                  <circle cx={px} cy={py} r={r.mapR*pulse*1.18} fill={r.color} opacity=".035"/>
-                  {isSel&&<circle cx={px} cy={py} r={r.mapR*.8} fill="none" stroke={r.color} strokeWidth="2" opacity=".5" strokeDasharray="4 3"/>}
-                  <circle cx={px} cy={py} r={r.mapR*.55} fill={r.color} opacity=".07" filter="url(#nodeglow)"/>
-                  <circle cx={px} cy={py} r={r.mapR*.42} fill={T.panel2} stroke={r.color} strokeWidth={isSel?2.5:1.8} strokeOpacity={isSel?1:.7}/>
-                  <text x={px} y={py-3} textAnchor="middle" fill={r.color} fontSize={r.mapR*.22+6} fontWeight="700" fontFamily="JetBrains Mono">{r.flag}</text>
-                  <text x={px} y={py+10} textAnchor="middle" fill={r.color} fontSize="9" fontWeight="700" fontFamily="JetBrains Mono">{r.name}</text>
-                  <text x={px} y={py+21} textAnchor="middle" fill={nc} fontSize="8" fontWeight="700" fontFamily="JetBrains Mono">
-                    {net>10?`+${Math.round(net)}B`:net<-10?`${Math.round(net)}B`:""}
-                  </text>
+                <div style={{padding:"12px 10px"}}>
+                  <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:10}}>
+                    <span style={{fontSize:26}}>{r.flag}</span>
+                    <div><div style={{fontSize:14,color:r.color,fontWeight:700,fontFamily:"Space Grotesk"}}>{r.name}</div>
+                    <div style={{fontSize:8,color:T.muted,fontFamily:"JetBrains Mono"}}>{r.en}</div></div>
+                    <ScoreRing score={hs} size={42}/>
+                  </div>
+                  <div style={{fontSize:8,color:T.muted,fontFamily:"JetBrains Mono",marginBottom:10,lineHeight:1.6}}>{r.description}</div>
+                  {[{l:"GDP 성장",v:`${r.gdpGrowth}%`,g:r.gdpGrowth>1.5},{l:"CPI",v:`${r.cpi}%`,g:r.cpi<3},{l:"실업률",v:`${r.unemploy}%`,g:r.unemploy<5},{l:"PMI",v:r.pmi,g:r.pmi>50},{l:"기준금리",v:`${r.policyRate}%`,g:true},{l:"10Y금리",v:`${r.rate10y}%`,g:true},{l:"경상수지",v:`${r.currentAcct}%`,g:r.currentAcct>0}].map(item=>(
+                    <div key={item.l} style={{display:"flex",justifyContent:"space-between",padding:"4px 6px",background:T.panel,borderRadius:3,marginBottom:2}}>
+                      <span style={{fontSize:8,color:T.muted,fontFamily:"JetBrains Mono"}}>{item.l}</span>
+                      <span style={{fontSize:9,fontWeight:700,color:item.g?T.green:T.red,fontFamily:"JetBrains Mono"}}>{item.v}</span>
+                    </div>
+                  ))}
+                  <div style={{marginTop:8,marginBottom:5}}>
+                    <div style={{display:"flex",justifyContent:"space-between",fontSize:8,fontFamily:"JetBrains Mono",fontWeight:700,marginBottom:4}}>
+                      <span style={{color:T.green}}>유입 +${inFlow}B</span>
+                      <span style={{color:T.red}}>유출 -${outFlow}B</span>
+                    </div>
+                    {rFlows.slice(0,5).map((f,i)=>{
+                      const isIn=f.to===r.id;const other=REGIONS.find(x=>x.id===(isIn?f.from:f.to));
+                      return(
+                        <div key={i} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"4px 6px",background:T.panel,borderRadius:3,marginBottom:2,border:`1px solid ${isIn?T.green:T.red}22`}}>
+                          <div style={{fontSize:8,color:T.text,fontFamily:"JetBrains Mono",flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+                            <span style={{color:isIn?T.green:T.red}}>{isIn?"←":"→"}</span> {other?.name}
+                          </div>
+                          <span style={{fontSize:9,fontWeight:700,color:isIn?T.green:T.red,fontFamily:"JetBrains Mono",marginLeft:4}}>${f.amt}B</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                  <div style={{marginTop:6}}>
+                    <div style={{fontSize:8,color:T.muted,fontFamily:"JetBrains Mono",fontWeight:700,marginBottom:4}}>KEY EVENTS</div>
+                    {r.keyEvents.map((ev,i)=><div key={i} style={{fontSize:8,color:T.text,fontFamily:"JetBrains Mono",padding:"3px 6px",background:r.color+"10",borderLeft:`2px solid ${r.color}66`,marginBottom:2}}>{ev}</div>)}
+                  </div>
+                  <div style={{marginTop:8,padding:"8px",background:r.color+"10",borderRadius:4,border:`1px solid ${r.color}33`}}>
+                    <div style={{fontSize:8,color:T.muted,fontFamily:"JetBrains Mono"}}>중앙은행: <span style={{color:r.color,fontWeight:700}}>{r.cbName}</span></div>
+                    <div style={{fontSize:8,color:T.text,fontFamily:"JetBrains Mono",marginTop:2}}>다음 회의: <span style={{color:T.gold}}>{r.nextCB}</span></div>
+                    <div style={{fontSize:8,color:T.text,fontFamily:"JetBrains Mono",marginTop:2}}>스탠스: <span style={{color:r.stanceDir>0?T.green:r.stanceDir<0?T.red:T.gold,fontWeight:700}}>{r.stance}</span></div>
+                  </div>
+                </div>
+              );
+            })():(
+              <div style={{padding:"12px 10px"}}>
+                <div style={{fontSize:9,color:T.muted,fontFamily:"JetBrains Mono",textAlign:"center",marginBottom:10,lineHeight:1.6}}>
+                  지역 클릭 → 상세 보기
+                </div>
+                <div style={{fontSize:9,color:T.muted,fontFamily:"JetBrains Mono",fontWeight:700,marginBottom:6}}>TOP FLOWS · {curMo.label}</div>
+                {[...flows].sort((a,b)=>b.amt-a.amt).slice(0,8).map((f,i)=>{
+                  const fr=REGIONS.find(r=>r.id===f.from),tr=REGIONS.find(r=>r.id===f.to);
+                  return(
+                    <div key={i} style={{padding:"6px 8px",background:T.panel,borderRadius:4,marginBottom:4,border:`1px solid ${f.color}33`}}>
+                      <div style={{display:"flex",justifyContent:"space-between",marginBottom:2}}>
+                        <span style={{fontSize:8,color:fr?.color,fontFamily:"JetBrains Mono",fontWeight:700}}>{fr?.name}→{tr?.name}</span>
+                        <span style={{fontSize:9,fontWeight:700,color:f.color,fontFamily:"JetBrains Mono"}}>${f.amt}B</span>
+                      </div>
+                      <div style={{height:3,background:T.dim,borderRadius:1}}><div style={{width:`${(f.amt/maxAmt)*100}%`,height:"100%",background:f.color,borderRadius:1}}/></div>
+                      <div style={{fontSize:7,color:T.dim,fontFamily:"JetBrains Mono",marginTop:2}}>{f.label}</div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ════════════════════════════════════════════════════════════════
+   TAB 2: MACRO CHAIN v2 — 국가별 선택 + 세부 데이터 + 뉴스
+════════════════════════════════════════════════════════════════ */
+
+// 국가별 체인 세부 데이터
+const COUNTRY_CHAIN_DATA={
+  us:{
+    cb:{title:"Fed 기준금리",value:"4.25~4.50%",status:"동결",detail:"2025년 2~3회 인하 기대. 인플레이션 2%대 복귀 확인 대기.",color:T.accent},
+    mktrate:{title:"미국 국채수익률",value:"10Y: 4.52%",status:"경고",detail:"2Y-10Y 역전 -0.34%p. 역사적 침체 선행 신호.",color:T.red},
+    infl:{title:"미국 CPI",value:"3.2% (전년비)",status:"주의",detail:"슈퍼코어 CPI 4%대. 서비스물가 고착화. 연준 목표 2% 상회.",color:T.orange},
+    empl:{title:"고용·성장",value:"실업 3.9%",status:"양호",detail:"비농업 고용 +25만명/월. 임금 상승률 4.5%. 소비 견조.",color:T.green},
+    fx:{title:"달러 인덱스",value:"DXY 104.2",status:"강세",detail:"달러 강세 → 신흥국 자금 이탈. 한국 외국인 순매도 연동.",color:T.accent},
+    geo:{title:"대외 지정학",value:"위험지수 45",status:"주의",detail:"트럼프 관세 2.0. 중국 반도체 수출규제. 러-우 전쟁 장기화.",color:T.orange},
+    tariff:{title:"무역정책",value:"관세 10~60%",status:"경보",detail:"보편관세 10%. 중국산 60%. 멕시코·캐나다 25% 위협. 2차 인플레 리스크.",color:T.red},
+    energy:{title:"에너지",value:"WTI $68.5",status:"안정",detail:"셰일 증산으로 공급 안정. LNG 수출 세계 1위 도약.",color:T.green},
+    minerals:{title:"핵심 원자재",value:"구리 $4.52/lb",status:"주시",detail:"AI 데이터센터 구리 수요 폭발. 미국 국내 광산 부활 시도.",color:T.gold},
+    equity:{title:"주식시장",value:"S&P 4,927",status:"비싸다",detail:"P/E 22x. AI 버블 논쟁. 빅테크 CapEx 사이클 유지 여부 관건.",color:T.orange},
+    bonds:{title:"채권시장",value:"10Y 4.52%",status:"관심",detail:"고금리 유지 → MMF $6T 대기. 금리 인하시 채권 자본차익 기대.",color:T.gold},
+    crypto:{title:"암호화폐",value:"BTC $85,420",status:"강세",detail:"ETF 자금 유입. 반감기 효과. 기관 수요 증가. 규제 명확화.",color:T.green},
+  },
+  cn:{
+    cb:{title:"PBOC 기준금리",value:"LPR 3.10%",status:"완화",detail:"경기 부양 위해 추가 인하 여지. 디플레이션 탈출이 목표.",color:T.green},
+    mktrate:{title:"중국 국채",value:"10Y: 2.35%",status:"저금리",detail:"내수 부진으로 수익률 급락. 채권 버블 우려 대두.",color:T.orange},
+    infl:{title:"중국 CPI",value:"0.4% (디플레)",status:"경보",detail:"소비자물가 0.4%. PPI -2.8%. 디플레이션 악순환 진입 위험.",color:T.red},
+    empl:{title:"고용·성장",value:"실업 5.1%",status:"주의",detail:"청년 실업률 18%. 부동산 디레버리징으로 고용 악화.",color:T.orange},
+    fx:{title:"위안화",value:"USD/CNY 7.24",status:"절하",detail:"자본 유출 방어. PBOC 고시환율로 절하 속도 조절.",color:T.red},
+    geo:{title:"대외 지정학",value:"위험지수 82",status:"경보",detail:"미국 반도체 수출규제. 대만 해협. 러시아와 밀착. G7 제재 위협.",color:T.red},
+    tariff:{title:"무역갈등",value:"미국관세 60%",status:"경보",detail:"트럼프 2기 관세 60% 위협. 우회 수출(멕시코·베트남) 막힘.",color:T.red},
+    energy:{title:"에너지",value:"세계 최대 수입",status:"의존",detail:"원유 1000만B/일 수입. 중동·러시아 의존. 에너지 안보 취약.",color:T.orange},
+    minerals:{title:"희토류",value:"세계 85% 장악",status:"무기화",detail:"수출규제로 서방 반도체·무기 생산 위협. 배터리 공급망 지배.",color:T.red},
+    equity:{title:"주식시장",value:"CSI300 3,512",status:"저평가",detail:"PBR 1.2x 역사적 저점. 국가대표 매수 vs 외국인 이탈 대립.",color:T.gold},
+    bonds:{title:"채권시장",value:"10Y 2.35%",status:"경고",detail:"금리 급락→채권 버블 우려. PBOC 매도 경고.",color:T.orange},
+    crypto:{title:"암호화폐",value:"국내 금지",status:"금지",detail:"2021년 전면 금지. 홍콩 통해 우회 허용. 디지털 위안화 추진.",color:T.red},
+  },
+  jp:{
+    cb:{title:"BOJ 기준금리",value:"0.50%",status:"긴축시작",detail:"17년만의 금리 정상화. 추가 인상 여부가 엔캐리 청산의 핵심.",color:T.red},
+    mktrate:{title:"일본 국채",value:"10Y: 1.05%",status:"상승중",detail:"YCC(수익률곡선제어) 폐지 후 금리 상승. JGB 급락 리스크.",color:T.orange},
+    infl:{title:"일본 CPI",value:"2.8%",status:"목표초과",detail:"BOJ 목표 2% 초과 지속. 임금-물가 선순환 확인 중.",color:T.orange},
+    empl:{title:"고용·성장",value:"실업 2.4%",status:"양호",detail:"완전고용에 가까운 수준. 임금 상승률 5%(춘투) 30년 최고.",color:T.green},
+    fx:{title:"엔화",value:"USD/JPY 149.2",status:"엔저",detail:"엔캐리 트레이드 규모 $4T 추정. 금리 역전 좁혀질수록 청산 위험.",color:T.red},
+    geo:{title:"대외 지정학",value:"위험지수 30",status:"안정",detail:"미일 동맹 강화. 방위비 증액(GDP 2%). 중국 견제 역할.",color:T.green},
+    tariff:{title:"무역정책",value:"미국 관세 협상",status:"주의",detail:"일본산 자동차 관세 협상 중. 한국보다 유리한 포지션.",color:T.gold},
+    energy:{title:"에너지",value:"LNG 최대 수입",status:"의존",detail:"원전 재가동 추진 중. LNG 의존도 여전히 높음.",color:T.orange},
+    minerals:{title:"희토류",value:"중국 의존",status:"위험",detail:"희토류 중국 의존 탈피 위해 호주·캐나다 공급망 구축 중.",color:T.orange},
+    equity:{title:"주식시장",value:"Nikkei 38,820",status:"역사적고점",detail:"PBR 1.4x. 버핏 효과+엔저+임금 상승이 3중 호재.",color:T.green},
+    bonds:{title:"채권시장",value:"JGB 10Y 1.05%",status:"변동성",detail:"YCC 폐지 후 채권 변동성 확대. 세계 최대 채무국(GDP 264%).",color:T.orange},
+    crypto:{title:"암호화폐",value:"BTC 법정결제수단",status:"친화적",detail:"2017년 세계 최초 BTC 법정결제 인정. 거래량 상위권.",color:T.green},
+  },
+  kr:{
+    cb:{title:"BOK 기준금리",value:"2.75%",status:"완화중",detail:"2024년 3차례 인하. 추가 인하 1~2회 기대. 가계부채 딜레마.",color:T.green},
+    mktrate:{title:"한국 국채",value:"10Y: 3.02%",status:"정상",detail:"정상적 우상향 곡선. 미국 대비 금리차 +1.50%p → 캐리 매력.",color:T.gold},
+    infl:{title:"한국 CPI",value:"2.0%",status:"안정",detail:"BOK 목표 2% 정확히 부합. 에너지·식품 안정화 기여.",color:T.green},
+    empl:{title:"고용·성장",value:"실업 3.0%",status:"양호",detail:"고용은 양호하나 제조업 구조조정 지속. 내수 회복 더딤.",color:T.green},
+    fx:{title:"원화",value:"USD/KRW 1,368",status:"약세",detail:"달러 강세+외국인 순매도+지정학 리스크 = 코리아 디스카운트.",color:T.red},
+    geo:{title:"대외 지정학",value:"위험지수 48",status:"주의",detail:"북한 미사일·핵. 미중 패권전쟁 사이의 전략적 딜레마. 탄핵 정국.",color:T.orange},
+    tariff:{title:"무역정책",value:"대미 수출 의존",status:"주의",detail:"전체 수출 중 반도체 비중 22%. 미국 관세 직접 영향권.",color:T.orange},
+    energy:{title:"에너지",value:"LNG 5위 수입국",status:"의존",detail:"에너지 100% 수입. 중동·호주 LNG 의존. 에너지 전환 가속.",color:T.orange},
+    minerals:{title:"반도체",value:"DRAM 세계 1위",status:"핵심",detail:"삼성·SK하이닉스 HBM3E AI 수요 직접 수혜. 공급망 핵심.",color:T.green},
+    equity:{title:"KOSPI",value:"PBR 0.85x",status:"저평가",detail:"코리아 디스카운트 역사적 저점. 외국인 23조 순매도(2024).",color:T.orange},
+    bonds:{title:"채권시장",value:"3년물 3.02%",status:"관심",detail:"금리 인하 사이클 → 채권 자본차익 기회. 외국인 채권 순매수.",color:T.gold},
+    crypto:{title:"암호화폐",value:"BTC 거래량 1위",status:"활발",detail:"원화 BTC 거래량 세계 최대. 업비트·빗썸. 과세 2025년 유예.",color:T.green},
+  },
+  tw:{
+    cb:{title:"CBC 기준금리",value:"2.00%",status:"중립",detail:"대만달러 강세 방어가 최우선. TSMC 투자로 통화 수요 급증.",color:T.gold},
+    mktrate:{title:"대만 국채",value:"10Y: 1.95%",status:"저금리",detail:"안정적 인플레. 반도체 붐으로 재정 건전. 금리 인상 여지 없음.",color:T.green},
+    infl:{title:"대만 CPI",value:"1.8%",status:"안정",detail:"목표 범위 내. 반도체 수출 호조로 경기 과열 없음.",color:T.green},
+    empl:{title:"고용·성장",value:"실업 3.5%",status:"양호",detail:"TSMC 고임금 일자리 창출. GDP 성장 3.8%(아시아 상위권).",color:T.green},
+    fx:{title:"대만달러",value:"USD/TWD 31.8",status:"강세",detail:"경상흑자 14.2%. TSMC 달러 수익→환전 압력.",color:T.green},
+    geo:{title:"대외 지정학",value:"위험지수 72",status:"경보",detail:"중국 군사 훈련 증가. TSMC 파괴=글로벌 반도체 공급 붕괴.",color:T.red},
+    tariff:{title:"무역정책",value:"미국 핵심 파트너",status:"양호",detail:"TSMC 아리조나 팹 건설. 미국의 핵심 반도체 동맹.",color:T.green},
+    energy:{title:"에너지",value:"100% 수입 의존",status:"취약",detail:"핵발전 폐기 결정 후 LNG 의존 심화. 에너지 안보 최대 아킬레스.",color:T.red},
+    minerals:{title:"반도체 파운드리",value:"TSMC 90%",status:"독점",detail:"첨단 3nm 이하 공정 TSMC가 사실상 독점. 글로벌 AI 핵심 병목.",color:T.green},
+    equity:{title:"TAIEX",value:"AI 수혜 최강",status:"강세",detail:"TSMC+AI 공급망 수혜로 사상 최고치. 반도체 ETF 자금 유입.",color:T.green},
+    bonds:{title:"채권시장",value:"안정",status:"안정",detail:"낮은 부채비율(27%). 재정 건전. 채권 리스크 낮음.",color:T.green},
+    crypto:{title:"암호화폐",value:"친화적 정책",status:"관심",detail:"블록체인 산업 육성. 반도체 기술과 블록체인 연계 추진.",color:T.gold},
+  },
+  eu:{
+    cb:{title:"ECB 기준금리",value:"2.65%",status:"완화중",detail:"2024년 연속 인하. 성장 둔화 대응. 독일 침체 우려.",color:T.green},
+    mktrate:{title:"유럽 국채",value:"Bund 10Y: 2.65%",status:"정상",detail:"독일-이탈리아 스프레드 주시. 재정 분열 리스크.",color:T.gold},
+    infl:{title:"유럽 CPI",value:"2.3%",status:"목표근접",detail:"ECB 목표 2% 근접. 서비스 물가는 여전히 4%대.",color:T.gold},
+    empl:{title:"고용·성장",value:"실업 6.2%",status:"주의",detail:"독일 실업 증가. 제조업 공동화. 전기차 전환 고통.",color:T.orange},
+    fx:{title:"유로화",value:"EUR/USD 1.088",status:"약보합",detail:"달러 대비 약세. 미국과 성장 격차→유로 자금 이탈.",color:T.orange},
+    geo:{title:"대외 지정학",value:"위험지수 58",status:"주의",detail:"러-우 전쟁 직접 영향. 에너지 독립 전환 비용. 미국 관세 위협.",color:T.orange},
+    tariff:{title:"무역정책",value:"미국 관세 협상",status:"긴장",detail:"트럼프 자동차 25% 관세 위협. 독일 BMW·벤츠 직접 타격.",color:T.red},
+    energy:{title:"에너지",value:"탈러시아 전환",status:"진행중",detail:"LNG 수입 급증. 재생에너지 확대. 에너지비용 상승→제조경쟁력 약화.",color:T.orange},
+    minerals:{title:"핵심 원자재",value:"중국 의존",status:"취약",detail:"희토류 중국 85% 의존. 탈탄소화→리튬·코발트 수요 급증.",color:T.orange},
+    equity:{title:"주식시장",value:"DAX 18,205",status:"방어적",detail:"저PER(14x) 저평가. 미국 대비 성장성 열위.",color:T.gold},
+    bonds:{title:"채권시장",value:"Bund 2.65%",status:"안전자산",detail:"독일 국채=유럽 안전자산. 재정위기국 스프레드 주시.",color:T.gold},
+    crypto:{title:"암호화폐",value:"MiCA 규제",status:"규제중",detail:"세계 최초 포괄적 크립토 규제 MiCA 시행. 기관 참여 확대.",color:T.gold},
+  },
+  me:{
+    cb:{title:"SAMA/UAE 기준금리",value:"5.50%",status:"Fed연동",detail:"달러 페그로 Fed 금리 자동 연동. 고금리 장기화 수혜.",color:T.gold},
+    mktrate:{title:"중동 국채",value:"5Y: 5.10%",status:"고금리",detail:"사우디 국채 수요 강함. 오일머니 재투자 순환.",color:T.green},
+    infl:{title:"중동 CPI",value:"4.1%",status:"주의",detail:"수입 물가 달러 연동. 비석유 부문 성장으로 내수 물가 상승.",color:T.orange},
+    empl:{title:"고용·성장",value:"GDP성장 3.2%",status:"양호",detail:"비전2030 비석유 부문 육성. 청년 고용 최대 과제.",color:T.gold},
+    fx:{title:"중동 통화",value:"SAR 3.75(고정)",status:"안정",detail:"달러 페그 유지. 원유 수입으로 외환보유고 풍부.",color:T.green},
+    geo:{title:"대외 지정학",value:"위험지수 68",status:"경보",detail:"이스라엘-이란 갈등. 홍해 물류 차질. OPEC+ 내부 갈등.",color:T.red},
+    tariff:{title:"무역정책",value:"OPEC+ 감산",status:"조율",detail:"OPEC+ 감산 정책으로 유가 지지. 미국 증산 압박.",color:T.orange},
+    energy:{title:"에너지",value:"세계 원유 33%",status:"패권",detail:"사우디 아람코 세계 최대 원유회사. 에너지 가격 결정권.",color:T.green},
+    minerals:{title:"국부펀드(SWF)",value:"$3.5T 운용",status:"공세적",detail:"PIF(사우디)·ADIA(UAE)·QIA(카타르). 글로벌 자산 매입 공세.",color:T.green},
+    equity:{title:"TADAWUL",value:"11,250",status:"양호",detail:"아람코 IPO 후 시장 확대. 외국인 투자 개방 진행 중.",color:T.green},
+    bonds:{title:"채권시장",value:"이슬람 채권",status:"특수",detail:"수쿠크(이슬람 채권) 시장 성장. 종교적 투자 원칙 적용.",color:T.gold},
+    crypto:{title:"암호화폐",value:"UAE 허브 추진",status:"친화적",detail:"UAE 두바이가 크립토 허브 추진. 자유무역지대 내 허용.",color:T.green},
+  },
+  latam:{
+    cb:{title:"BCB/Banxico",value:"10.50%",status:"고금리",detail:"브라질 10.5%. 멕시코 11.25%. 인플레 잡기 위한 고강도 긴축.",color:T.red},
+    mktrate:{title:"중남미 국채",value:"10Y: 12.8%(브라질)",status:"고위험",detail:"높은 금리=높은 이자부담. 달러 강세→부채 악화.",color:T.red},
+    infl:{title:"중남미 CPI",value:"8.2%(평균)",status:"경보",detail:"아르헨티나 초인플레. 브라질·멕시코 완화 중. 달러 강세 압력.",color:T.red},
+    empl:{title:"고용·성장",value:"실업 8.5%",status:"주의",detail:"비공식 경제 비중 높음. 청년 실업 심각. GDP 성장 2.1%.",color:T.orange},
+    fx:{title:"통화",value:"BRL 4.97/USD",status:"약세",detail:"브라질·멕시코 페소 달러 강세에 취약. 자원 수출로 부분 방어.",color:T.orange},
+    geo:{title:"대외 지정학",value:"위험지수 55",status:"주의",detail:"리튬 삼각지대 자원 패권. 중국 투자 vs 미국 견제.",color:T.orange},
+    tariff:{title:"무역정책",value:"미국 니어쇼어링",status:"기회",detail:"멕시코: 미국 최대 교역국. 제조업 리쇼어링 수혜.",color:T.green},
+    energy:{title:"에너지",value:"브라질 원유 신흥",status:"성장",detail:"브라질 심해 원유 생산 증가. 멕시코 국영 페멕스 민영화 논의.",color:T.gold},
+    minerals:{title:"리튬 삼각지대",value:"세계 58% 매장",status:"핵심",detail:"볼리비아·칠레·아르헨티나 리튬. EV 배터리 핵심 원료 패권.",color:T.green},
+    equity:{title:"BOVESPA",value:"127,400",status:"변동성",detail:"원자재 수혜+헤알화 약세. 외국인 투자 변동성 높음.",color:T.gold},
+    bonds:{title:"채권시장",value:"10Y 12.8%",status:"고위험",detail:"고금리 캐리트레이드 매력. 환위험이 최대 리스크.",color:T.gold},
+    crypto:{title:"암호화폐",value:"BTC 결제 시험",status:"성장",detail:"브라질: 라틴아메리카 최대 크립토 시장. 달러화 대안 수요.",color:T.gold},
+  },
+  oceania:{
+    cb:{title:"RBA 기준금리",value:"4.35%",status:"완화시작",detail:"2025년 첫 인하. 주택 가격 과열 vs 성장 둔화 딜레마.",color:T.gold},
+    mktrate:{title:"호주 국채",value:"10Y: 4.42%",status:"고금리",detail:"미국과 유사한 금리 수준. 중국 경기 연동 리스크.",color:T.gold},
+    infl:{title:"호주 CPI",value:"3.2%",status:"주의",detail:"목표 2~3% 상단. 주거비·서비스 물가 완고.",color:T.orange},
+    empl:{title:"고용·성장",value:"실업 4.2%",status:"양호",detail:"이민자 유입으로 노동공급 증가. GDP 1.5% 완만한 성장.",color:T.gold},
+    fx:{title:"호주달러",value:"AUD/USD 0.64",status:"약세",detail:"중국 경기 연동. 철광석 가격 하락→호주달러 약세.",color:T.orange},
+    geo:{title:"대외 지정학",value:"위험지수 22",status:"안정",detail:"AUKUS 핵잠 동맹. 중국과 무역전쟁 후 관계 복원 중.",color:T.green},
+    tariff:{title:"무역정책",value:"중국 의존 탈피",status:"다변화",detail:"중국 제재→인도·EU·한국으로 수출 다변화 중.",color:T.gold},
+    energy:{title:"에너지",value:"LNG 세계 2위 수출",status:"강점",detail:"LNG 수출 세계 2위. 호주 LNG→아시아(한국·일본) 장기계약.",color:T.green},
+    minerals:{title:"원자재",value:"철광석·리튬·석탄",status:"핵심",detail:"철광석 세계 1위(필바라). 리튬·희토류. 중국 최대 원료 공급처.",color:T.green},
+    equity:{title:"ASX200",value:"7,820",status:"양호",detail:"자원+금융 중심. 중국 경기 회복시 강한 수혜.",color:T.gold},
+    bonds:{title:"채권시장",value:"10Y 4.42%",status:"관심",detail:"금리 인하 사이클 진입. 채권 자본차익 기회.",color:T.gold},
+    crypto:{title:"암호화폐",value:"ETF 승인",status:"성장",detail:"호주 BTC ETF 승인. 기관 투자 증가. 아태지역 크립토 허브.",color:T.green},
+  },
+};
+
+// 국가별 뉴스 링크 (Google News 검색 링크로 항상 최신 뉴스)
+const COUNTRY_NEWS={
+  us:[
+    {title:"Fed 금리 결정 및 통화정책",url:"https://news.google.com/search?q=Federal+Reserve+interest+rate+decision+2025&hl=ko",src:"Google News"},
+    {title:"미국 경제 지표 (CPI·고용)",url:"https://news.google.com/search?q=US+CPI+inflation+jobs+report+2025&hl=ko",src:"Google News"},
+    {title:"트럼프 관세 정책",url:"https://news.google.com/search?q=Trump+tariffs+trade+policy+2025&hl=ko",src:"Google News"},
+    {title:"S&P500·NASDAQ 시황",url:"https://news.google.com/search?q=S%26P500+stock+market+outlook+2025&hl=ko",src:"Google News"},
+    {title:"AI·빅테크 투자 사이클",url:"https://news.google.com/search?q=AI+investment+cycle+Nvidia+Microsoft+2025&hl=ko",src:"Google News"},
+    {title:"달러 인덱스·환율",url:"https://news.google.com/search?q=dollar+index+DXY+currency+2025&hl=ko",src:"Google News"},
+  ],
+  cn:[
+    {title:"중국 경제 지표 (GDP·PMI)",url:"https://news.google.com/search?q=China+GDP+PMI+economic+data+2025&hl=ko",src:"Google News"},
+    {title:"PBOC 통화정책·위안화",url:"https://news.google.com/search?q=PBOC+monetary+policy+yuan+2025&hl=ko",src:"Google News"},
+    {title:"미중 반도체 무역전쟁",url:"https://news.google.com/search?q=US+China+semiconductor+export+controls+2025&hl=ko",src:"Google News"},
+    {title:"중국 부동산 위기",url:"https://news.google.com/search?q=China+real+estate+property+crisis+2025&hl=ko",src:"Google News"},
+    {title:"중국 희토류 수출규제",url:"https://news.google.com/search?q=China+rare+earth+export+restrictions+2025&hl=ko",src:"Google News"},
+    {title:"상하이·CSI300 시황",url:"https://news.google.com/search?q=Shanghai+CSI300+China+stocks+2025&hl=ko",src:"Google News"},
+  ],
+  jp:[
+    {title:"BOJ 금리 정상화",url:"https://news.google.com/search?q=Bank+of+Japan+BOJ+rate+hike+2025&hl=ko",src:"Google News"},
+    {title:"엔캐리 트레이드 청산",url:"https://news.google.com/search?q=yen+carry+trade+unwinding+2025&hl=ko",src:"Google News"},
+    {title:"엔화 환율",url:"https://news.google.com/search?q=Japanese+yen+exchange+rate+2025&hl=ko",src:"Google News"},
+    {title:"닛케이 주식시장",url:"https://news.google.com/search?q=Nikkei+Japan+stocks+2025&hl=ko",src:"Google News"},
+    {title:"일본 임금·인플레이션",url:"https://news.google.com/search?q=Japan+wages+inflation+CPI+2025&hl=ko",src:"Google News"},
+    {title:"일본 반도체·소재 수출",url:"https://news.google.com/search?q=Japan+semiconductor+materials+export+2025&hl=ko",src:"Google News"},
+  ],
+  kr:[
+    {title:"한국은행 기준금리",url:"https://news.google.com/search?q=한국은행+기준금리+통화정책+2025&hl=ko",src:"Google News"},
+    {title:"코스피·외국인 순매도",url:"https://news.google.com/search?q=코스피+외국인+순매도+2025&hl=ko",src:"Google News"},
+    {title:"삼성전자·SK하이닉스 HBM",url:"https://news.google.com/search?q=삼성전자+SK하이닉스+HBM+반도체+2025&hl=ko",src:"Google News"},
+    {title:"원달러 환율",url:"https://news.google.com/search?q=원달러+환율+2025&hl=ko",src:"Google News"},
+    {title:"한국 경제 성장률",url:"https://news.google.com/search?q=한국+경제+성장률+GDP+2025&hl=ko",src:"Google News"},
+    {title:"코리아 디스카운트",url:"https://news.google.com/search?q=코리아디스카운트+기업가치+제고+2025&hl=ko",src:"Google News"},
+  ],
+  tw:[
+    {title:"TSMC 실적·AI 반도체",url:"https://news.google.com/search?q=TSMC+earnings+AI+chips+2025&hl=ko",src:"Google News"},
+    {title:"대만 지정학 리스크",url:"https://news.google.com/search?q=Taiwan+geopolitical+risk+China+2025&hl=ko",src:"Google News"},
+    {title:"TAIEX 주식시장",url:"https://news.google.com/search?q=Taiwan+TAIEX+stock+market+2025&hl=ko",src:"Google News"},
+    {title:"대만달러 환율",url:"https://news.google.com/search?q=Taiwan+dollar+TWD+exchange+rate+2025&hl=ko",src:"Google News"},
+    {title:"반도체 공급망",url:"https://news.google.com/search?q=semiconductor+supply+chain+Taiwan+2025&hl=ko",src:"Google News"},
+    {title:"중국-대만 해협 긴장",url:"https://news.google.com/search?q=China+Taiwan+strait+tension+2025&hl=ko",src:"Google News"},
+  ],
+  eu:[
+    {title:"ECB 금리 결정",url:"https://news.google.com/search?q=ECB+interest+rate+decision+2025&hl=ko",src:"Google News"},
+    {title:"유럽 경제 성장·독일 침체",url:"https://news.google.com/search?q=Europe+economy+Germany+recession+2025&hl=ko",src:"Google News"},
+    {title:"유로화 환율",url:"https://news.google.com/search?q=euro+EUR+USD+exchange+rate+2025&hl=ko",src:"Google News"},
+    {title:"미국 관세 유럽 영향",url:"https://news.google.com/search?q=US+tariffs+Europe+impact+2025&hl=ko",src:"Google News"},
+    {title:"러-우 전쟁 경제 영향",url:"https://news.google.com/search?q=Russia+Ukraine+war+European+economy+2025&hl=ko",src:"Google News"},
+    {title:"DAX·유럽 주식",url:"https://news.google.com/search?q=DAX+European+stocks+2025&hl=ko",src:"Google News"},
+  ],
+  me:[
+    {title:"OPEC+ 원유 생산 정책",url:"https://news.google.com/search?q=OPEC+oil+production+policy+2025&hl=ko",src:"Google News"},
+    {title:"사우디·UAE 국부펀드",url:"https://news.google.com/search?q=Saudi+UAE+sovereign+wealth+fund+2025&hl=ko",src:"Google News"},
+    {title:"이스라엘-이란 갈등",url:"https://news.google.com/search?q=Israel+Iran+conflict+2025&hl=ko",src:"Google News"},
+    {title:"WTI·브렌트 유가",url:"https://news.google.com/search?q=WTI+Brent+oil+price+2025&hl=ko",src:"Google News"},
+    {title:"사우디 비전2030",url:"https://news.google.com/search?q=Saudi+Vision+2030+economy+2025&hl=ko",src:"Google News"},
+    {title:"홍해 물류 차질",url:"https://news.google.com/search?q=Red+Sea+shipping+disruption+2025&hl=ko",src:"Google News"},
+  ],
+  latam:[
+    {title:"브라질 경제·레알화",url:"https://news.google.com/search?q=Brazil+economy+real+currency+2025&hl=ko",src:"Google News"},
+    {title:"리튬 삼각지대 투자",url:"https://news.google.com/search?q=lithium+triangle+Latin+America+investment+2025&hl=ko",src:"Google News"},
+    {title:"멕시코 니어쇼어링",url:"https://news.google.com/search?q=Mexico+nearshoring+manufacturing+2025&hl=ko",src:"Google News"},
+    {title:"중국의 라틴아메리카 투자",url:"https://news.google.com/search?q=China+Latin+America+investment+2025&hl=ko",src:"Google News"},
+    {title:"BOVESPA 브라질 주식",url:"https://news.google.com/search?q=BOVESPA+Brazil+stocks+2025&hl=ko",src:"Google News"},
+    {title:"라틴아메리카 인플레이션",url:"https://news.google.com/search?q=Latin+America+inflation+2025&hl=ko",src:"Google News"},
+  ],
+  oceania:[
+    {title:"RBA 금리 인하",url:"https://news.google.com/search?q=RBA+Reserve+Bank+Australia+rate+cut+2025&hl=ko",src:"Google News"},
+    {title:"호주 철광석·리튬 시장",url:"https://news.google.com/search?q=Australia+iron+ore+lithium+commodity+2025&hl=ko",src:"Google News"},
+    {title:"AUD 환율",url:"https://news.google.com/search?q=Australian+dollar+AUD+exchange+rate+2025&hl=ko",src:"Google News"},
+    {title:"호주·중국 무역관계",url:"https://news.google.com/search?q=Australia+China+trade+relationship+2025&hl=ko",src:"Google News"},
+    {title:"ASX200 주식시장",url:"https://news.google.com/search?q=ASX200+Australia+stocks+2025&hl=ko",src:"Google News"},
+    {title:"AUKUS 방위 동맹",url:"https://news.google.com/search?q=AUKUS+defense+alliance+2025&hl=ko",src:"Google News"},
+  ],
+};
+
+function MacroChainView(){
+  const [hover,setHover]=useState(null);
+  const [selNode,setSelNode]=useState(null);
+  const [selRegion,setSelRegion]=useState("us"); // 국가 선택
+  const [chainMode,setChainMode]=useState("global"); // "global" | "country"
+  const [tick,setTick]=useState(0);
+  const [newsOpen,setNewsOpen]=useState(false);
+  useEffect(()=>{const iv=setInterval(()=>setTick(t=>t+1),60);return()=>clearInterval(iv);},[]);
+
+  const W=720,H=420;
+  const region=REGIONS.find(r=>r.id===selRegion);
+  const chainData=COUNTRY_CHAIN_DATA[selRegion]||COUNTRY_CHAIN_DATA.us;
+  const news=COUNTRY_NEWS[selRegion]||[];
+
+  // 국가별 노드 상태 색상
+  function nodeStatusColor(nodeId){
+    const d=chainData[nodeId];if(!d)return T.muted;
+    if(d.status==="경보"||d.status==="역전"||d.status==="위험"||d.status==="금지"||d.status==="취약")return T.red;
+    if(d.status==="주의"||d.status==="약세"||d.status==="엔저"||d.status==="절하"||d.status==="긴장")return T.orange;
+    if(d.status==="양호"||d.status==="안정"||d.status==="강세"||d.status==="친화적"||d.status==="완화중"||d.status==="핵심"||d.status==="패권")return T.green;
+    return T.gold;
+  }
+
+  const nodeColor=chainMode==="global"?n=>n.color:n=>(nodeStatusColor(n.id)||n.color);
+
+  return(
+    <div style={{display:"flex",height:"100%"}}>
+      {/* 메인 영역 */}
+      <div style={{flex:1,display:"flex",flexDirection:"column",overflow:"hidden"}}>
+        {/* 컨트롤 */}
+        <div style={{padding:"7px 14px",background:T.panel2,borderBottom:`1px solid ${T.border}`,display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>
+          <div style={{display:"flex",gap:3}}>
+            <button className={`btn${chainMode==="global"?" a":""}`} onClick={()=>setChainMode("global")}>🌍 글로벌 연결고리</button>
+            <button className={`btn${chainMode==="country"?" ga":""}`} onClick={()=>setChainMode("country")}>🏴 국가별 세부 분석</button>
+          </div>
+          {chainMode==="country"&&(
+            <div style={{display:"flex",gap:3,flexWrap:"wrap"}}>
+              {REGIONS.map(r=>(
+                <button key={r.id} onClick={()=>setSelRegion(r.id)}
+                  style={{padding:"3px 9px",borderRadius:3,border:`1px solid ${selRegion===r.id?r.color:T.border}`,
+                    background:selRegion===r.id?r.color+"18":"transparent",color:selRegion===r.id?r.color:T.muted,
+                    fontFamily:"JetBrains Mono",fontSize:9.5,cursor:"pointer",flexShrink:0}}>
+                  {r.flag} {r.name}
+                </button>
+              ))}
+            </div>
+          )}
+          {chainMode==="country"&&(
+            <button className={`btn${newsOpen?" ra":""}`} onClick={()=>setNewsOpen(p=>!p)} style={{marginLeft:"auto",flexShrink:0}}>
+              📰 {newsOpen?"뉴스 닫기":"뉴스 열기"}
+            </button>
+          )}
+        </div>
+
+        {/* SVG 차트 */}
+        <div style={{flex:1,position:"relative",overflow:"hidden"}}>
+          <svg width="100%" height="100%" viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="xMidYMid meet" style={{display:"block"}}>
+            <defs>
+              <radialGradient id="cBg" cx="50%" cy="50%" r="70%"><stop offset="0%" stopColor="#080e1e"/><stop offset="100%" stopColor="#04060d"/></radialGradient>
+              <filter id="cGlow"><feGaussianBlur stdDeviation="3" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+              <filter id="cGlowHard"><feGaussianBlur stdDeviation="5" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+              <marker id="arr" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto">
+                <path d="M 0 0 L 6 3 L 0 6 Z" fill="#2a3a4a"/>
+              </marker>
+              <marker id="arrG" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto">
+                <path d="M 0 0 L 6 3 L 0 6 Z" fill={T.green}/>
+              </marker>
+              <marker id="arrR" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto">
+                <path d="M 0 0 L 6 3 L 0 6 Z" fill={T.red}/>
+              </marker>
+            </defs>
+            <rect width={W} height={H} fill="url(#cBg)"/>
+
+            {/* 국가 배너 */}
+            {chainMode==="country"&&region&&(
+              <g>
+                <rect x="8" y="6" width="140" height="34" rx="4" fill={region.color+"15"} stroke={region.color+"55"} strokeWidth="1"/>
+                <text x="18" y="20" fill={region.color} fontSize="14" fontFamily="JetBrains Mono">{region.flag}</text>
+                <text x="38" y="20" fill={region.color} fontSize="11" fontWeight="700" fontFamily="Space Grotesk">{region.name}</text>
+                <text x="18" y="33" fill={T.muted} fontSize="8" fontFamily="JetBrains Mono">{region.en} · {region.policyRate}% 기준금리</text>
+              </g>
+            )}
+
+            {/* 엣지 */}
+            {CHAIN_EDGES.map(e=>{
+              const fn=CHAIN_NODES.find(n=>n.id===e.from),tn=CHAIN_NODES.find(n=>n.id===e.to);if(!fn||!tn)return null;
+              const x1=fn.x*W,y1=fn.y*H,x2=tn.x*W,y2=tn.y*H;
+              const mx=(x1+x2)/2+(y2-y1)*.2,my=(y1+y2)/2-(x2-x1)*.2;
+              const isH=hover===`${e.from}-${e.to}`;
+              const isSel=selNode&&(e.from===selNode||e.to===selNode);
+              const active=!selNode||isSel;
+
+              // 국가 모드: 양쪽 노드 상태로 엣지 색상 결정
+              let edgeCol=e.color;
+              if(chainMode==="country"){
+                const fStatus=nodeStatusColor(e.from),tStatus=nodeStatusColor(e.to);
+                if(fStatus===T.red||tStatus===T.red)edgeCol=T.red+"cc";
+                else if(fStatus===T.orange||tStatus===T.orange)edgeCol=T.orange+"cc";
+                else edgeCol=T.green+"cc";
+              }
+              const sw=e.weight*(isH?2:1)*.9;
+              const col=isH?edgeCol:(active?edgeCol:T.dim);
+              const op=isH?.95:active?.4+(e.weight*.08):.07;
+              const markerEnd=isH&&chainMode==="country"?(edgeCol===T.red+"cc"?"url(#arrR)":"url(#arrG)"):"url(#arr)";
+              return(
+                <g key={`${e.from}-${e.to}`}
+                  onMouseEnter={()=>setHover(`${e.from}-${e.to}`)}
+                  onMouseLeave={()=>setHover(null)}
+                  style={{cursor:"pointer"}}>
+                  {isH&&<path d={`M${x1},${y1} Q${mx},${my} ${x2},${y2}`} stroke={col} strokeWidth={sw*4} strokeOpacity=".07" fill="none" filter="url(#cGlowHard)"/>}
+                  <path d={`M${x1},${y1} Q${mx},${my} ${x2},${y2}`}
+                    stroke={col} strokeWidth={sw} strokeOpacity={op} fill="none"
+                    markerEnd={markerEnd}
+                    strokeDasharray={isH?"none":"8 4"}/>
+                  {(isH||isSel)&&<text x={mx} y={my} textAnchor="middle" dy="-7" fill={col} fontSize="9" fontWeight="700" fontFamily="JetBrains Mono" opacity=".9">{e.label}</text>}
                 </g>
               );
             })}
 
-            {/* 범례 */}
-            <rect x="6" y="6" width="128" height="60" rx="4" fill="#04060d" opacity=".92"/>
-            <text x="14" y="20" fill={T.muted} fontSize="9" fontFamily="JetBrains Mono" fontWeight="700">자금 규모</text>
-            {[["XL",">$200B","#ff3355",4.5],["LG","$100~200B","#ff9800",3.2],["MD","$50~100B","#f0b429",2.0],["SM","<$50B","#00e676",1.2]].map(([tier,rng,col,w],i)=>(
-              <g key={tier} transform={`translate(10,${28+i*10})`}>
-                <line x1="0" y1="4" x2="26" y2="4" stroke={col} strokeWidth={w} opacity=".8"/>
-                <circle cx="26" cy="4" r={w+1} fill={col} opacity=".8"/>
-                <text x="32" y="8" fill={col} fontSize="8" fontFamily="JetBrains Mono">{tier}: {rng}</text>
+            {/* 노드 */}
+            {CHAIN_NODES.map(n=>{
+              const px=n.x*W,py=n.y*H;
+              const pulse=Math.sin(tick*.05+n.x*7)*.08+.92;
+              const isSel=selNode===n.id;
+              const isConn=selNode&&CHAIN_EDGES.some(e=>e.from===selNode&&e.to===n.id||e.to===selNode&&e.from===n.id);
+              const active=!selNode||isSel||isConn;
+              const nc=chainMode==="country"?nodeStatusColor(n.id):n.color;
+              const sz=isSel?54:44;
+              const cd=chainData[n.id];
+
+              return(
+                <g key={n.id} onClick={()=>setSelNode(p=>p===n.id?null:n.id)} style={{cursor:"pointer"}}>
+                  <circle cx={px} cy={py} r={sz*.9*pulse} fill={nc} opacity={active?.05:.015}/>
+                  {isSel&&<circle cx={px} cy={py} r={sz*.78} fill="none" stroke={nc} strokeWidth="2" strokeDasharray="5 3" opacity=".7"/>}
+                  <circle cx={px} cy={py} r={sz*.5} fill={nc} opacity=".08" filter="url(#cGlow)"/>
+                  <circle cx={px} cy={py} r={sz*.44} fill={T.panel2} stroke={nc} strokeWidth={isSel?2.8:1.8} opacity={active?1:.3}/>
+                  <text x={px} y={py-5} textAnchor="middle" fill={nc} fontSize={isSel?15:13} opacity={active?1:.3}>{n.icon}</text>
+                  <text x={px} y={py+7} textAnchor="middle" fill={nc} fontSize="9" fontWeight="700" fontFamily="JetBrains Mono" opacity={active?1:.3}>{n.label}</text>
+                  {/* 국가 모드: 상태 배지 */}
+                  {chainMode==="country"&&cd&&(
+                    <g>
+                      <rect x={px-20} y={py+12} width="40" height="12" rx="3" fill={nc+"30"} stroke={nc+"60"}/>
+                      <text x={px} y={py+21} textAnchor="middle" fill={nc} fontSize="7" fontWeight="700" fontFamily="JetBrains Mono">{cd.status}</text>
+                    </g>
+                  )}
+                  {/* 글로벌 모드: 서브레이블 */}
+                  {chainMode==="global"&&<text x={px} y={py+18} textAnchor="middle" fill={T.muted} fontSize="7.5" fontFamily="JetBrains Mono" opacity={active?.8:.2}>{n.sub}</text>}
+                </g>
+              );
+            })}
+
+            {/* 범례 (국가 모드) */}
+            {chainMode==="country"&&(
+              <g transform={`translate(${W-130},6)`}>
+                <rect x="0" y="0" width="122" height="52" rx="4" fill="#04060d" opacity=".92" stroke={T.border}/>
+                <text x="8" y="16" fill={T.muted} fontSize="8" fontFamily="JetBrains Mono" fontWeight="700">노드 상태</text>
+                {[[T.green,"양호·안정·친화적"],[T.gold,"주의·모니터링"],[T.orange,"경고·부담"],[T.red,"경보·위험"]].map(([c,l],i)=>(
+                  <g key={i} transform={`translate(8,${22+i*8})`}>
+                    <circle cx="5" cy="3" r="4" fill={c} opacity=".8"/>
+                    <text x="13" y="7" fill={c} fontSize="7.5" fontFamily="JetBrains Mono">{l}</text>
+                  </g>
+                ))}
               </g>
-            ))}
+            )}
           </svg>
         </div>
+      </div>
 
-        {/* 사이드: 선택 지역 상세 */}
-        <div style={{width:240,borderLeft:`1px solid ${T.border}`,overflowY:"auto",background:T.panel2}}>
-          {selRegion?(()=>{
-            const r=REGIONS.find(x=>x.id===selRegion);if(!r)return null;
-            const rFlows=flows.filter(f=>f.from===r.id||f.to===r.id).sort((a,b)=>b.amt-a.amt);
-            const inFlow=flows.filter(f=>f.to===r.id).reduce((s,f)=>s+f.amt,0);
-            const outFlow=flows.filter(f=>f.from===r.id).reduce((s,f)=>s+f.amt,0);
-            const hs=Math.round(
-              (r.gdpGrowth>2?12:r.gdpGrowth>0?5:-8)+
-              (r.cpi<2.5&&r.cpi>0?10:r.cpi<4?4:-8)+
-              (r.unemploy<4?12:r.unemploy<6?5:-6)+
-              (r.pmi>52?10:r.pmi>50?4:-5)+
-              (r.currentAcct>0?8:-4)+50
-            );
+      {/* 오른쪽 사이드 패널 */}
+      <div style={{width:260,borderLeft:`1px solid ${T.border}`,overflowY:"auto",background:T.panel2,display:"flex",flexDirection:"column"}}>
+        {/* 뉴스 섹션 */}
+        {chainMode==="country"&&newsOpen&&(
+          <div style={{borderBottom:`1px solid ${T.border}`,background:"#060c18"}}>
+            <div style={{padding:"8px 10px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+              <span style={{fontSize:9,color:T.muted,fontFamily:"JetBrains Mono",fontWeight:700}}>
+                📰 {region?.name} 주요 뉴스
+              </span>
+              <span style={{fontSize:7,color:T.dim,fontFamily:"JetBrains Mono"}}>Google News 링크</span>
+            </div>
+            {news.map((n,i)=>(
+              <a key={i} href={n.url} target="_blank" rel="noopener"
+                style={{display:"flex",alignItems:"center",gap:8,padding:"7px 10px",borderBottom:`1px solid ${T.border}`,
+                  textDecoration:"none",cursor:"pointer",background:"transparent",
+                  transition:"background .15s"}}
+                onMouseEnter={e=>e.currentTarget.style.background=T.dim+"66"}
+                onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
+                <span style={{fontSize:16,flexShrink:0}}>{region?.flag}</span>
+                <div style={{flex:1,overflow:"hidden"}}>
+                  <div style={{fontSize:8.5,color:T.accent,fontFamily:"JetBrains Mono",fontWeight:700,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{n.title}</div>
+                  <div style={{fontSize:7,color:T.muted,fontFamily:"JetBrains Mono",marginTop:1}}>🔗 {n.src}</div>
+                </div>
+                <span style={{fontSize:9,color:T.dim,flexShrink:0}}>↗</span>
+              </a>
+            ))}
+          </div>
+        )}
+
+        {/* 노드 상세 / 글로벌 체인 설명 */}
+        <div style={{flex:1,padding:"10px 10px",overflowY:"auto"}}>
+          {selNode&&chainMode==="country"?(()=>{
+            const n=CHAIN_NODES.find(x=>x.id===selNode);if(!n)return null;
+            const cd=chainData[selNode];if(!cd)return null;
+            const nc=nodeStatusColor(selNode);
+            const outEdges=CHAIN_EDGES.filter(e=>e.from===selNode);
+            const inEdges=CHAIN_EDGES.filter(e=>e.to===selNode);
             return(
-              <div style={{padding:"12px 10px"}}>
-                <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:10}}>
-                  <span style={{fontSize:26}}>{r.flag}</span>
-                  <div><div style={{fontSize:14,color:r.color,fontWeight:700,fontFamily:"Space Grotesk"}}>{r.name}</div>
-                  <div style={{fontSize:8,color:T.muted,fontFamily:"JetBrains Mono"}}>{r.en}</div></div>
-                  <ScoreRing score={hs} size={42}/>
-                </div>
-                <div style={{fontSize:8,color:T.muted,fontFamily:"JetBrains Mono",marginBottom:10,lineHeight:1.6}}>{r.description}</div>
-
-                {/* 핵심 지표 */}
-                {[{l:"GDP 성장",v:`${r.gdpGrowth}%`,g:r.gdpGrowth>1.5},{l:"CPI",v:`${r.cpi}%`,g:r.cpi<3},{l:"실업률",v:`${r.unemploy}%`,g:r.unemploy<5},{l:"PMI",v:r.pmi,g:r.pmi>50},{l:"기준금리",v:`${r.policyRate}%`,g:true},{l:"10Y금리",v:`${r.rate10y}%`,g:true},{l:"경상수지",v:`${r.currentAcct}%`,g:r.currentAcct>0}].map(item=>(
-                  <div key={item.l} style={{display:"flex",justifyContent:"space-between",padding:"4px 6px",background:T.panel,borderRadius:3,marginBottom:2}}>
-                    <span style={{fontSize:8,color:T.muted,fontFamily:"JetBrains Mono"}}>{item.l}</span>
-                    <span style={{fontSize:9,fontWeight:700,color:item.g?T.green:T.red,fontFamily:"JetBrains Mono"}}>{item.v}</span>
+              <div>
+                <div style={{padding:"10px",background:nc+"12",borderRadius:5,border:`1px solid ${nc}44`,marginBottom:10}}>
+                  <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:6}}>
+                    <span style={{fontSize:18}}>{n.icon}</span>
+                    <div>
+                      <div style={{fontSize:13,color:nc,fontWeight:700,fontFamily:"Space Grotesk"}}>{n.label}</div>
+                      <div style={{fontSize:8,color:T.muted,fontFamily:"JetBrains Mono"}}>{n.sub}</div>
+                    </div>
+                    <div style={{marginLeft:"auto",padding:"3px 9px",background:nc+"20",borderRadius:3,border:`1px solid ${nc}66`}}>
+                      <div style={{fontSize:8,color:nc,fontFamily:"JetBrains Mono",fontWeight:700}}>{cd.status}</div>
+                    </div>
                   </div>
-                ))}
-
-                {/* 자금 흐름 */}
-                <div style={{marginTop:8,marginBottom:5}}>
-                  <div style={{display:"flex",justifyContent:"space-between",fontSize:8,fontFamily:"JetBrains Mono",fontWeight:700,marginBottom:4}}>
-                    <span style={{color:T.green}}>유입 +${inFlow}B</span>
-                    <span style={{color:T.red}}>유출 -${outFlow}B</span>
-                  </div>
-                  {rFlows.slice(0,5).map((f,i)=>{
-                    const isIn=f.to===r.id;
-                    const other=REGIONS.find(x=>x.id===(isIn?f.from:f.to));
-                    return(
-                      <div key={i} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"4px 6px",background:T.panel,borderRadius:3,marginBottom:2,border:`1px solid ${isIn?T.green:T.red}22`}}>
-                        <div style={{fontSize:8,color:T.text,fontFamily:"JetBrains Mono",flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
-                          <span style={{color:isIn?T.green:T.red}}>{isIn?"←":"→"}</span> {other?.name}
-                        </div>
-                        <span style={{fontSize:9,fontWeight:700,color:isIn?T.green:T.red,fontFamily:"JetBrains Mono",marginLeft:4}}>${f.amt}B</span>
-                      </div>
-                    );
-                  })}
+                  <div style={{fontSize:10,color:T.text,fontFamily:"Space Grotesk",fontWeight:700,marginBottom:4}}>{cd.title}</div>
+                  <div style={{fontSize:12,color:nc,fontFamily:"JetBrains Mono",fontWeight:700,marginBottom:4}}>{cd.value}</div>
+                  <div style={{fontSize:8.5,color:T.muted,fontFamily:"JetBrains Mono",lineHeight:1.7}}>{cd.detail}</div>
                 </div>
-
-                {/* 주요 이벤트 */}
-                <div style={{marginTop:6}}>
-                  <div style={{fontSize:8,color:T.muted,fontFamily:"JetBrains Mono",fontWeight:700,marginBottom:4}}>KEY EVENTS</div>
-                  {r.keyEvents.map((ev,i)=><div key={i} style={{fontSize:8,color:T.text,fontFamily:"JetBrains Mono",padding:"3px 6px",background:r.color+"10",borderLeft:`2px solid ${r.color}66`,marginBottom:2}}>{ev}</div>)}
+                {inEdges.length>0&&(<>
+                  <div style={{fontSize:8,color:T.green,fontFamily:"JetBrains Mono",fontWeight:700,marginBottom:4}}>← {region?.name}에서 영향 받는 요인</div>
+                  {inEdges.map(e=>{const fn=CHAIN_NODES.find(x=>x.id===e.from);const fc=chainData[e.from];return(
+                    <div key={e.from} style={{padding:"6px 8px",background:T.panel,borderRadius:3,marginBottom:3,border:`1px solid ${nodeStatusColor(e.from)}22`}}>
+                      <div style={{fontSize:9,color:nodeStatusColor(e.from),fontFamily:"JetBrains Mono",fontWeight:700}}>{fn?.icon} {fn?.label}</div>
+                      <div style={{fontSize:8,color:T.text,fontFamily:"JetBrains Mono"}}>{e.label}</div>
+                      {fc&&<div style={{fontSize:7,color:T.muted,fontFamily:"JetBrains Mono",marginTop:1}}>{fc.value}</div>}
+                    </div>
+                  );})}
+                </>)}
+                {outEdges.length>0&&(<>
+                  <div style={{fontSize:8,color:T.red,fontFamily:"JetBrains Mono",fontWeight:700,marginTop:8,marginBottom:4}}>→ {region?.name}에 영향 주는 요인</div>
+                  {outEdges.map(e=>{const tn=CHAIN_NODES.find(x=>x.id===e.to);const tc=chainData[e.to];return(
+                    <div key={e.to} style={{padding:"6px 8px",background:T.panel,borderRadius:3,marginBottom:3,border:`1px solid ${nodeStatusColor(e.to)}22`}}>
+                      <div style={{fontSize:9,color:nodeStatusColor(e.to),fontFamily:"JetBrains Mono",fontWeight:700}}>{tn?.icon} {tn?.label}</div>
+                      <div style={{fontSize:8,color:T.text,fontFamily:"JetBrains Mono"}}>{e.label}</div>
+                      {tc&&<div style={{fontSize:7,color:T.muted,fontFamily:"JetBrains Mono",marginTop:1}}>{tc.value}</div>}
+                    </div>
+                  );})}
+                </>)}
+              </div>
+            );
+          })():selNode&&chainMode==="global"?(()=>{
+            const n=CHAIN_NODES.find(x=>x.id===selNode);if(!n)return null;
+            const outEdges=CHAIN_EDGES.filter(e=>e.from===selNode);
+            const inEdges=CHAIN_EDGES.filter(e=>e.to===selNode);
+            return(
+              <div>
+                <div style={{padding:"10px",background:n.color+"12",borderRadius:5,border:`1px solid ${n.color}44`,marginBottom:10}}>
+                  <div style={{fontSize:14,color:n.color,fontWeight:700,fontFamily:"Space Grotesk"}}>{n.icon} {n.label}</div>
+                  <div style={{fontSize:8,color:T.muted,fontFamily:"JetBrains Mono"}}>{n.sub}</div>
                 </div>
-
-                {/* 중앙은행 */}
-                <div style={{marginTop:8,padding:"8px",background:r.color+"10",borderRadius:4,border:`1px solid ${r.color}33`}}>
-                  <div style={{fontSize:8,color:T.muted,fontFamily:"JetBrains Mono"}}>중앙은행: <span style={{color:r.color,fontWeight:700}}>{r.cbName}</span></div>
-                  <div style={{fontSize:8,color:T.text,fontFamily:"JetBrains Mono",marginTop:2}}>다음 회의: <span style={{color:T.gold}}>{r.nextCB}</span></div>
-                  <div style={{fontSize:8,color:T.text,fontFamily:"JetBrains Mono",marginTop:2}}>스탠스: <span style={{color:r.stanceDir>0?T.green:r.stanceDir<0?T.red:T.gold,fontWeight:700}}>{r.stance}</span></div>
-                </div>
+                {inEdges.length>0&&(<>
+                  <div style={{fontSize:8,color:T.green,fontFamily:"JetBrains Mono",fontWeight:700,marginBottom:4}}>← 영향 받는 요인</div>
+                  {inEdges.map(e=>{const fn=CHAIN_NODES.find(x=>x.id===e.from);return(<div key={e.from} style={{padding:"5px 8px",background:T.panel,borderRadius:3,marginBottom:3,border:`1px solid ${e.color}22`}}><div style={{fontSize:9,color:e.color,fontFamily:"JetBrains Mono"}}>{fn?.icon} {fn?.label}</div><div style={{fontSize:8,color:T.muted,fontFamily:"JetBrains Mono"}}>{e.label}</div><div style={{fontSize:7,color:T.dim,fontFamily:"JetBrains Mono"}}>{e.desc}</div></div>);})}
+                </>)}
+                {outEdges.length>0&&(<>
+                  <div style={{fontSize:8,color:T.red,fontFamily:"JetBrains Mono",fontWeight:700,marginTop:8,marginBottom:4}}>→ 영향 주는 요인</div>
+                  {outEdges.map(e=>{const tn=CHAIN_NODES.find(x=>x.id===e.to);return(<div key={e.to} style={{padding:"5px 8px",background:T.panel,borderRadius:3,marginBottom:3,border:`1px solid ${e.color}22`}}><div style={{fontSize:9,color:e.color,fontFamily:"JetBrains Mono"}}>{tn?.icon} {tn?.label}</div><div style={{fontSize:8,color:T.text,fontFamily:"JetBrains Mono"}}>{e.label}</div><div style={{fontSize:7,color:T.dim,fontFamily:"JetBrains Mono"}}>{e.desc}</div></div>);})}
+                </>)}
               </div>
             );
           })():(
-            <div style={{padding:"16px 12px"}}>
-              <div style={{fontSize:9,color:T.muted,fontFamily:"JetBrains Mono",textAlign:"center",marginBottom:12,lineHeight:1.6}}>
-                지역을 클릭하면<br/>상세 정보를 볼 수 있습니다
-              </div>
-              {/* 흐름 TOP 랭킹 */}
-              <div style={{fontSize:9,color:T.muted,fontFamily:"JetBrains Mono",fontWeight:700,marginBottom:6,letterSpacing:".1em"}}>TOP FLOWS · {curMo.label}</div>
-              {[...flows].sort((a,b)=>b.amt-a.amt).slice(0,8).map((f,i)=>{
-                const fr=REGIONS.find(r=>r.id===f.from),tr=REGIONS.find(r=>r.id===f.to);
-                return(
-                  <div key={i} style={{padding:"6px 8px",background:T.panel,borderRadius:4,marginBottom:4,border:`1px solid ${f.color}33`}}>
-                    <div style={{display:"flex",justifyContent:"space-between",marginBottom:2}}>
-                      <span style={{fontSize:8,color:fr?.color,fontFamily:"JetBrains Mono",fontWeight:700}}>{fr?.name}→{tr?.name}</span>
-                      <span style={{fontSize:9,fontWeight:700,color:f.color,fontFamily:"JetBrains Mono"}}>${f.amt}B</span>
+            <div>
+              {chainMode==="country"&&region?(
+                <>
+                  {/* 국가 전체 현황 */}
+                  <div style={{padding:"10px",background:region.color+"10",borderRadius:5,border:`1px solid ${region.color}33`,marginBottom:10}}>
+                    <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:6}}>
+                      <span style={{fontSize:22}}>{region.flag}</span>
+                      <div>
+                        <div style={{fontSize:14,color:region.color,fontWeight:700,fontFamily:"Space Grotesk"}}>{region.name}</div>
+                        <div style={{fontSize:8,color:T.muted,fontFamily:"JetBrains Mono"}}>{region.cbName} · {region.policyRate}%</div>
+                      </div>
                     </div>
-                    <div style={{height:2,background:T.dim,borderRadius:1}}><div style={{width:`${(f.amt/maxAmt)*100}%`,height:"100%",background:f.color,borderRadius:1}}/></div>
-                    <div style={{fontSize:7,color:T.dim,fontFamily:"JetBrains Mono",marginTop:2}}>{f.label}</div>
+                    <div style={{fontSize:8,color:T.muted,fontFamily:"JetBrains Mono",lineHeight:1.6}}>{region.description}</div>
                   </div>
-                );
-              })}
+                  <div style={{fontSize:8,color:T.muted,fontFamily:"JetBrains Mono",fontWeight:700,marginBottom:6}}>체인 노드 현황 요약</div>
+                  {Object.entries(chainData).map(([k,cd])=>{
+                    const n=CHAIN_NODES.find(x=>x.id===k);if(!n)return null;
+                    const nc=nodeStatusColor(k);
+                    return(
+                      <div key={k} onClick={()=>setSelNode(p=>p===k?null:k)} style={{display:"flex",alignItems:"center",gap:7,padding:"6px 8px",background:T.panel,borderRadius:3,marginBottom:3,cursor:"pointer",border:`1px solid ${nc}22`}}>
+                        <span style={{fontSize:12}}>{n.icon}</span>
+                        <div style={{flex:1,overflow:"hidden"}}>
+                          <div style={{fontSize:8.5,color:nc,fontFamily:"JetBrains Mono",fontWeight:700}}>{n.label}</div>
+                          <div style={{fontSize:7.5,color:T.muted,fontFamily:"JetBrains Mono",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{cd.value}</div>
+                        </div>
+                        <div style={{padding:"2px 6px",background:nc+"20",borderRadius:2,border:`1px solid ${nc}55`}}>
+                          <div style={{fontSize:7,color:nc,fontFamily:"JetBrains Mono",fontWeight:700,whiteSpace:"nowrap"}}>{cd.status}</div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </>
+              ):(
+                <>
+                  <div style={{fontSize:9,color:T.muted,fontFamily:"JetBrains Mono",fontWeight:700,marginBottom:6,letterSpacing:".1em"}}>MACRO TRANSMISSION MAP</div>
+                  <div style={{fontSize:8,color:T.muted,fontFamily:"JetBrains Mono",lineHeight:1.7,marginBottom:10}}>
+                    노드 클릭 → 연결 경로 확인<br/>
+                    「국가별 세부 분석」탭에서 국가 선택 후 각 노드의 실제 데이터를 확인하세요.
+                  </div>
+                  <div style={{fontSize:8,color:T.muted,fontFamily:"JetBrains Mono",fontWeight:700,marginBottom:6}}>핵심 전달 경로 (strength 3)</div>
+                  {CHAIN_EDGES.filter(e=>e.weight===3).map(e=>{
+                    const fn=CHAIN_NODES.find(n=>n.id===e.from),tn=CHAIN_NODES.find(n=>n.id===e.to);
+                    return(<div key={`${e.from}-${e.to}`} style={{padding:"6px 8px",background:T.panel,borderRadius:4,marginBottom:4,border:`1px solid ${e.color}33`}}>
+                      <div style={{fontSize:8.5,color:e.color,fontFamily:"JetBrains Mono",fontWeight:700}}>{fn?.icon} → {tn?.icon}</div>
+                      <div style={{fontSize:8,color:T.text,fontFamily:"JetBrains Mono"}}>{e.label}</div>
+                      <div style={{fontSize:7,color:T.muted,fontFamily:"JetBrains Mono",marginTop:2}}>{e.desc}</div>
+                    </div>);
+                  })}
+                </>
+              )}
             </div>
           )}
         </div>
@@ -695,356 +1409,6 @@ function WorldMapView(){
   );
 }
 
-
-/* ════════════════════════════════════════════════════════════════
-   TAB 2: MACRO CHAIN — 연결고리 시각화
-════════════════════════════════════════════════════════════════ */
-function MacroChainView(){
-  const [hover,setHover]=useState(null);
-  const [selNode,setSelNode]=useState(null);
-  const [tick,setTick]=useState(0);
-  useEffect(()=>{const iv=setInterval(()=>setTick(t=>t+1),60);return()=>clearInterval(iv);},[]);
-
-  const W=760,H=440;
-
-  const connEdges=selNode?CHAIN_EDGES.filter(e=>e.from===selNode||e.to===selNode):CHAIN_EDGES;
-
-  return(
-    <div style={{display:"flex",height:"100%",gap:0}}>
-      <div style={{flex:1,position:"relative",overflow:"hidden"}}>
-        <svg width="100%" height="100%" viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="xMidYMid meet" style={{display:"block"}}>
-          <defs>
-            <radialGradient id="cBg" cx="50%" cy="50%" r="70%"><stop offset="0%" stopColor="#080e1e"/><stop offset="100%" stopColor="#04060d"/></radialGradient>
-            <filter id="cGlow"><feGaussianBlur stdDeviation="3" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
-            <marker id="arr" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto">
-              <path d="M 0 0 L 6 3 L 0 6 Z" fill="#2a3a4a"/>
-            </marker>
-          </defs>
-          <rect width={W} height={H} fill="url(#cBg)"/>
-
-          {/* 엣지 */}
-          {CHAIN_EDGES.map(e=>{
-            const fn=CHAIN_NODES.find(n=>n.id===e.from),tn=CHAIN_NODES.find(n=>n.id===e.to);if(!fn||!tn)return null;
-            const x1=fn.x*W,y1=fn.y*H,x2=tn.x*W,y2=tn.y*H;
-            const mx=(x1+x2)/2+(y2-y1)*.2,my=(y1+y2)/2-(x2-x1)*.2;
-            const isH=hover===`${e.from}-${e.to}`;
-            const isSel=selNode&&(e.from===selNode||e.to===selNode);
-            const active=!selNode||isSel;
-            const sw=e.weight*(isH?2:1)*.8;
-            const col=isH?e.color:(active?e.color:T.dim);
-            const op=isH?.95:active?.35+(e.weight*.08):.08;
-            return(
-              <g key={`${e.from}-${e.to}`}
-                onMouseEnter={()=>setHover(`${e.from}-${e.to}`)}
-                onMouseLeave={()=>setHover(null)}
-                style={{cursor:"pointer"}}>
-                {isH&&<path d={`M${x1},${y1} Q${mx},${my} ${x2},${y2}`} stroke={col} strokeWidth={sw*3.5} strokeOpacity=".08" fill="none" filter="url(#cGlow)"/>}
-                <path d={`M${x1},${y1} Q${mx},${my} ${x2},${y2}`}
-                  stroke={col} strokeWidth={sw} strokeOpacity={op} fill="none"
-                  markerEnd="url(#arr)"
-                  strokeDasharray={isH?"none":"8 4"}/>
-                {(isH||isSel)&&<text x={mx} y={my} textAnchor="middle" dy="-6" fill={col} fontSize="9" fontWeight="700" fontFamily="JetBrains Mono" opacity=".9">{e.label}</text>}
-              </g>
-            );
-          })}
-
-          {/* 노드 */}
-          {CHAIN_NODES.map(n=>{
-            const px=n.x*W,py=n.y*H;
-            const pulse=Math.sin(tick*.05+n.x*7)*.08+.92;
-            const isSel=selNode===n.id;const isConn=selNode&&CHAIN_EDGES.some(e=>e.from===selNode&&e.to===n.id||e.to===selNode&&e.from===n.id);
-            const active=!selNode||isSel||isConn;
-            const sz=isSel?52:42;
-            return(
-              <g key={n.id} onClick={()=>setSelNode(p=>p===n.id?null:n.id)} style={{cursor:"pointer"}}>
-                <circle cx={px} cy={py} r={sz*.9*pulse} fill={n.color} opacity={active?.04:.015}/>
-                {isSel&&<circle cx={px} cy={py} r={sz*.75} fill="none" stroke={n.color} strokeWidth="2" strokeDasharray="5 3" opacity=".6"/>}
-                <circle cx={px} cy={py} r={sz*.5} fill={T.panel2} stroke={n.color} strokeWidth={isSel?2.5:1.5} opacity={active?1:.3}/>
-                <text x={px} y={py-4} textAnchor="middle" fill={n.color} fontSize={isSel?15:13} opacity={active?1:.3}>{n.icon}</text>
-                <text x={px} y={py+8} textAnchor="middle" fill={n.color} fontSize="9" fontWeight="700" fontFamily="JetBrains Mono" opacity={active?1:.3}>{n.label}</text>
-                <text x={px} y={py+18} textAnchor="middle" fill={T.muted} fontSize="7.5" fontFamily="JetBrains Mono" opacity={active?.8:.2}>{n.sub}</text>
-              </g>
-            );
-          })}
-        </svg>
-      </div>
-
-      {/* 사이드 */}
-      <div style={{width:240,borderLeft:`1px solid ${T.border}`,overflowY:"auto",background:T.panel2,padding:"12px 10px"}}>
-        <div style={{fontSize:9,color:T.muted,fontFamily:"JetBrains Mono",fontWeight:700,marginBottom:10,letterSpacing:".1em"}}>MACRO TRANSMISSION MAP</div>
-        <div style={{fontSize:8,color:T.muted,fontFamily:"JetBrains Mono",lineHeight:1.7,marginBottom:12}}>
-          노드를 클릭하면 연결된 전달 경로만 표시됩니다.
-        </div>
-        {(hover?(()=>{
-          const e=CHAIN_EDGES.find(x=>`${x.from}-${x.to}`===hover);if(!e)return null;
-          const fn=CHAIN_NODES.find(n=>n.id===e.from),tn=CHAIN_NODES.find(n=>n.id===e.to);
-          return(
-            <div style={{padding:"10px",background:e.color+"12",borderRadius:5,border:`1px solid ${e.color}44`,marginBottom:10}}>
-              <div style={{fontSize:10,color:e.color,fontFamily:"JetBrains Mono",fontWeight:700,marginBottom:4}}>{e.label}</div>
-              <div style={{fontSize:9,color:T.text,fontFamily:"JetBrains Mono",marginBottom:4}}>{fn?.icon} {fn?.label} → {tn?.icon} {tn?.label}</div>
-              <div style={{fontSize:8,color:T.muted,fontFamily:"JetBrains Mono",lineHeight:1.6}}>{e.desc}</div>
-              <div style={{display:"flex",gap:2,marginTop:6}}>{Array.from({length:3},(_,i)=><div key={i} style={{width:8,height:8,borderRadius:2,background:i<e.weight?e.color:T.dim}}/>)}<span style={{fontSize:7,color:T.muted,fontFamily:"JetBrains Mono",marginLeft:4}}>영향강도</span></div>
-            </div>
-          );
-        })():null)}
-
-        {selNode&&(()=>{
-          const n=CHAIN_NODES.find(x=>x.id===selNode);if(!n)return null;
-          const outEdges=CHAIN_EDGES.filter(e=>e.from===selNode);
-          const inEdges=CHAIN_EDGES.filter(e=>e.to===selNode);
-          return(
-            <div>
-              <div style={{padding:"10px",background:n.color+"12",borderRadius:5,border:`1px solid ${n.color}44`,marginBottom:8}}>
-                <div style={{fontSize:12,color:n.color,fontWeight:700,fontFamily:"Space Grotesk"}}>{n.icon} {n.label}</div>
-                <div style={{fontSize:8,color:T.muted,fontFamily:"JetBrains Mono"}}>{n.sub}</div>
-              </div>
-              {inEdges.length>0&&(<>
-                <div style={{fontSize:8,color:T.green,fontFamily:"JetBrains Mono",fontWeight:700,marginBottom:4}}>← 영향 받는 요인</div>
-                {inEdges.map(e=>{const fn=CHAIN_NODES.find(x=>x.id===e.from);return(
-                  <div key={e.from} style={{padding:"5px 8px",background:T.panel,borderRadius:3,marginBottom:3,border:`1px solid ${e.color}22`}}>
-                    <div style={{fontSize:8,color:e.color,fontFamily:"JetBrains Mono"}}>{fn?.icon} {fn?.label}</div>
-                    <div style={{fontSize:7,color:T.muted,fontFamily:"JetBrains Mono"}}>{e.label}</div>
-                  </div>
-                );})}
-              </>)}
-              {outEdges.length>0&&(<>
-                <div style={{fontSize:8,color:T.red,fontFamily:"JetBrains Mono",fontWeight:700,marginTop:8,marginBottom:4}}>→ 영향 주는 요인</div>
-                {outEdges.map(e=>{const tn=CHAIN_NODES.find(x=>x.id===e.to);return(
-                  <div key={e.to} style={{padding:"5px 8px",background:T.panel,borderRadius:3,marginBottom:3,border:`1px solid ${e.color}22`}}>
-                    <div style={{fontSize:8,color:e.color,fontFamily:"JetBrains Mono"}}>{tn?.icon} {tn?.label}</div>
-                    <div style={{fontSize:7,color:T.muted,fontFamily:"JetBrains Mono"}}>{e.label}</div>
-                  </div>
-                );})}
-              </>)}
-            </div>
-          );
-        })()}
-
-        {!selNode&&!hover&&(
-          <div>
-            <div style={{fontSize:9,color:T.muted,fontFamily:"JetBrains Mono",fontWeight:700,marginBottom:6}}>핵심 전달 경로</div>
-            {CHAIN_EDGES.filter(e=>e.weight===3).map(e=>{
-              const fn=CHAIN_NODES.find(n=>n.id===e.from),tn=CHAIN_NODES.find(n=>n.id===e.to);
-              return(
-                <div key={`${e.from}-${e.to}`} style={{padding:"6px 8px",background:T.panel,borderRadius:4,marginBottom:4,border:`1px solid ${e.color}33`}}>
-                  <div style={{fontSize:8,color:e.color,fontFamily:"JetBrains Mono",fontWeight:700}}>{fn?.icon} → {tn?.icon}</div>
-                  <div style={{fontSize:8,color:T.text,fontFamily:"JetBrains Mono"}}>{e.label}</div>
-                  <div style={{fontSize:7,color:T.muted,fontFamily:"JetBrains Mono",marginTop:2}}>{e.desc}</div>
-                </div>
-              );
-            })}
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-/* ════════════════════════════════════════════════════════════════
-   TAB 3: TIMELINE — 스냅샷 + 타임라인
-════════════════════════════════════════════════════════════════ */
-function TimelineView(){
-  const [moIdx,setMoIdx]=useState(MONTHS.length-1);
-  const [playing,setPlaying]=useState(false);
-  const [speed,setSpeed]=useState(1.0);
-  const [viewMode,setViewMode]=useState("snapshot");
-  const playRef=useRef(null);
-
-  useEffect(()=>{if(playing){playRef.current=setInterval(()=>setMoIdx(m=>{if(m>=MONTHS.length-1){setPlaying(false);return m;}return m+1;}),Math.round(900/speed));}return()=>clearInterval(playRef.current);},[playing,speed]);
-
-  const curFlows=useMemo(()=>FLOWS.map(f=>({...f,amt:f.amounts[moIdx]})),[moIdx]);
-  const topFlows=useMemo(()=>[...curFlows].sort((a,b)=>b.amt-a.amt).slice(0,12),[curFlows]);
-  const totalIn=useMemo(()=>REGIONS.map(r=>({...r,inflow:curFlows.filter(f=>f.to===r.id).reduce((s,f)=>s+f.amt,0),outflow:curFlows.filter(f=>f.from===r.id).reduce((s,f)=>s+f.amt,0)})),[curFlows]);
-
-  const curMo=MONTHS[moIdx];
-
-  // CSV 다운로드
-  function downloadCSV(){
-    const rows=[["Month","From","To","Amount(B)","Label","Tier"]];
-    MONTHS.forEach((mo,mi)=>{
-      FLOWS.forEach(f=>{
-        rows.push([mo.label,f.from,f.to,f.amounts[mi],f.label,f.tier]);
-      });
-    });
-    const csv=rows.map(r=>r.map(v=>`"${v}"`).join(",")).join("\n");
-    const a=document.createElement("a");a.href="data:text/csv;charset=utf-8,"+encodeURIComponent(csv);a.download="global_capital_flows.csv";a.click();
-  }
-
-  function downloadJSON(){
-    const data={metadata:{generated:new Date().toISOString(),months:MONTHS.length,flows:FLOWS.length},regions:REGIONS.map(r=>({id:r.id,name:r.name,gdpGrowth:r.gdpGrowth,cpi:r.cpi,policyRate:r.policyRate,rate10y:r.rate10y})),flows:FLOWS.map(f=>({from:f.from,to:f.to,label:f.label,tier:f.tier,monthlyAmounts:MONTHS.map((m,i)=>({month:m.label,amount:f.amounts[i]}))  }))};
-    const a=document.createElement("a");a.href="data:application/json;charset=utf-8,"+encodeURIComponent(JSON.stringify(data,null,2));a.download="global_macro_flows.json";a.click();
-  }
-
-  return(
-    <div style={{display:"flex",flexDirection:"column",height:"100%"}}>
-      {/* 컨트롤 */}
-      <div style={{padding:"8px 14px",background:T.panel2,borderBottom:`1px solid ${T.border}`,display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>
-        <div style={{display:"flex",gap:4}}>
-          <button className={`btn${viewMode==="snapshot"?" a":""}`} onClick={()=>setViewMode("snapshot")}>📸 스냅샷</button>
-          <button className={`btn${viewMode==="timeline"?" a":""}`} onClick={()=>setViewMode("timeline")}>📅 타임라인</button>
-          <button className={`btn${viewMode==="heatmap"?" a":""}`} onClick={()=>setViewMode("heatmap")}>🔥 히트맵</button>
-        </div>
-        <button onClick={()=>setPlaying(p=>!p)} style={{padding:"4px 12px",borderRadius:3,border:`1px solid ${playing?T.accent:T.border}`,background:playing?T.accent+"20":"transparent",color:playing?T.accent:T.muted,fontFamily:"JetBrains Mono",fontSize:10,cursor:"pointer"}}>
-          {playing?"⏸ 정지":"▶ 재생"}
-        </button>
-        <div style={{flex:1,minWidth:200}}>
-          <div style={{display:"flex",justifyContent:"space-between",marginBottom:2}}>
-            {MONTHS.filter((_,i)=>i%3===0).map((m,i)=><span key={i} style={{fontSize:7,color:T.dim,fontFamily:"JetBrains Mono"}}>{m.label.slice(2)}</span>)}
-          </div>
-          <input type="range" min="0" max={MONTHS.length-1} value={moIdx} onChange={e=>{setMoIdx(+e.target.value);setPlaying(false);}}/>
-        </div>
-        <div style={{fontFamily:"Space Grotesk",fontSize:14,fontWeight:700,color:T.accent,minWidth:65}}>{curMo.label}</div>
-        <div style={{display:"flex",gap:4}}>
-          <button className="btn ga" onClick={downloadCSV}>⬇ CSV</button>
-          <button className="btn pa" onClick={downloadJSON}>⬇ JSON</button>
-        </div>
-      </div>
-
-      <div style={{flex:1,overflow:"auto",padding:"12px 14px"}}>
-        {viewMode==="snapshot"&&(
-          <div>
-            {/* 지역별 자금 현황 */}
-            <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8,marginBottom:12}}>
-              {totalIn.map(r=>{
-                const net=r.inflow-r.outflow;
-                return(
-                  <div key={r.id} style={{background:T.panel,border:`1px solid ${r.color}44`,borderRadius:5,padding:"10px 12px"}}>
-                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
-                      <div style={{display:"flex",alignItems:"center",gap:6}}>
-                        <span style={{fontSize:16}}>{r.flag}</span>
-                        <span style={{fontSize:11,color:r.color,fontWeight:700,fontFamily:"Space Grotesk"}}>{r.name}</span>
-                      </div>
-                      <span style={{fontSize:10,color:net>0?T.green:T.red,fontWeight:700,fontFamily:"JetBrains Mono"}}>{net>0?"+":""}${Math.round(net)}B</span>
-                    </div>
-                    <div style={{display:"flex",gap:10,marginBottom:6}}>
-                      <div style={{flex:1}}>
-                        <div style={{fontSize:7,color:T.muted,fontFamily:"JetBrains Mono",marginBottom:1}}>유입</div>
-                        <div style={{fontSize:11,color:T.green,fontWeight:700,fontFamily:"JetBrains Mono"}}>${r.inflow}B</div>
-                      </div>
-                      <div style={{flex:1}}>
-                        <div style={{fontSize:7,color:T.muted,fontFamily:"JetBrains Mono",marginBottom:1}}>유출</div>
-                        <div style={{fontSize:11,color:T.red,fontWeight:700,fontFamily:"JetBrains Mono"}}>${r.outflow}B</div>
-                      </div>
-                    </div>
-                    <div style={{height:4,background:T.dim,borderRadius:2,overflow:"hidden"}}>
-                      <div style={{width:`${Math.min((r.inflow/(r.inflow+r.outflow||1))*100,100)}%`,height:"100%",background:net>0?T.green:T.red,borderRadius:2}}/>
-                    </div>
-                    <div style={{fontSize:8,color:T.muted,fontFamily:"JetBrains Mono",marginTop:4}}>{r.gdpGrowth>0?"GDP ▲":"GDP ▼"}{r.gdpGrowth}% · CPI {r.cpi}% · PMI {r.pmi}</div>
-                  </div>
-                );
-              })}
-            </div>
-
-            {/* TOP 플로우 */}
-            <div style={{marginBottom:12}}>
-              <div style={{fontSize:9,color:T.muted,fontFamily:"JetBrains Mono",fontWeight:700,marginBottom:6,letterSpacing:".1em"}}>TOP FLOWS · {curMo.label}</div>
-              <div style={{display:"grid",gridTemplateColumns:"repeat(2,1fr)",gap:5}}>
-                {topFlows.map((f,i)=>{
-                  const fr=REGIONS.find(r=>r.id===f.from),tr=REGIONS.find(r=>r.id===f.to);
-                  const prev=moIdx>0?f.amounts[moIdx-1]:f.amounts[0];const delta=f.amt-prev;
-                  return(
-                    <div key={i} style={{background:T.panel,borderRadius:4,padding:"8px 10px",border:`1px solid ${f.color}33`}}>
-                      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:3}}>
-                        <span style={{fontSize:9,color:fr?.color,fontFamily:"JetBrains Mono",fontWeight:700}}>{fr?.flag}{fr?.name} → {tr?.flag}{tr?.name}</span>
-                        <span style={{fontSize:9,color:delta>=0?T.green:T.red,fontFamily:"JetBrains Mono"}}>{delta>=0?"▲":"▼"}${Math.abs(delta)}B</span>
-                      </div>
-                      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-                        <span style={{fontSize:13,fontWeight:700,color:f.color,fontFamily:"JetBrains Mono"}}>${f.amt}B</span>
-                        <Spark data={f.amounts} width={70} height={22}/>
-                      </div>
-                      <div style={{fontSize:7,color:T.dim,fontFamily:"JetBrains Mono",marginTop:2}}>{f.label}</div>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          </div>
-        )}
-
-        {viewMode==="timeline"&&(
-          <div>
-            <div style={{fontSize:9,color:T.muted,fontFamily:"JetBrains Mono",fontWeight:700,marginBottom:8,letterSpacing:".1em"}}>24개월 타임라인 · 모든 자금 흐름</div>
-            {FLOWS.map(f=>{
-              const fr=REGIONS.find(r=>r.id===f.from),tr=REGIONS.find(r=>r.id===f.to);const maxV=Math.max(...f.amounts);
-              return(
-                <div key={`${f.from}-${f.to}`} style={{background:T.panel,borderRadius:4,padding:"8px 10px",marginBottom:5,border:`1px solid ${f.color}22`}}>
-                  <div style={{display:"flex",justifyContent:"space-between",marginBottom:5}}>
-                    <span style={{fontSize:9,color:fr?.color,fontFamily:"JetBrains Mono",fontWeight:700}}>{fr?.flag} {fr?.name} → {tr?.flag} {tr?.name}</span>
-                    <div style={{display:"flex",gap:6}}>
-                      <span style={{fontSize:8,color:T.muted,fontFamily:"JetBrains Mono"}}>{f.label}</span>
-                      <span style={{fontSize:9,fontWeight:700,color:f.color,fontFamily:"JetBrains Mono"}}>${f.amounts[moIdx]}B</span>
-                    </div>
-                  </div>
-                  <div style={{display:"flex",alignItems:"flex-end",gap:1,height:40}}>
-                    {f.amounts.map((v,i)=>{const bh=(v/maxV)*38;const isCur=i===moIdx;return(
-                      <div key={i} onClick={()=>setMoIdx(i)} title={`${MONTHS[i].label}: $${v}B`}
-                        style={{flex:1,display:"flex",flexDirection:"column",justifyContent:"flex-end",cursor:"pointer",height:40}}>
-                        <div style={{width:"100%",height:bh,background:isCur?f.color:f.color+"44",borderRadius:"2px 2px 0 0",transition:"height .2s",boxShadow:isCur?`0 0 6px ${f.color}88`:""}}/>
-                      </div>
-                    );})}
-                  </div>
-                  <div style={{display:"flex",justifyContent:"space-between",marginTop:2}}>
-                    {MONTHS.filter((_,i)=>i%6===0).map((m,i)=><span key={i} style={{fontSize:7,color:T.dim,fontFamily:"JetBrains Mono"}}>{m.label.slice(2)}</span>)}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        )}
-
-        {viewMode==="heatmap"&&(
-          <div>
-            <div style={{fontSize:9,color:T.muted,fontFamily:"JetBrains Mono",fontWeight:700,marginBottom:8}}>지역간 자금 흐름 매트릭스 (현재: {curMo.label})</div>
-            <div style={{overflowX:"auto"}}>
-              <table style={{borderCollapse:"collapse",fontFamily:"JetBrains Mono",fontSize:9,minWidth:600}}>
-                <thead>
-                  <tr>
-                    <th style={{padding:"6px 10px",color:T.muted,textAlign:"left",borderBottom:`1px solid ${T.border}`,fontSize:8}}>FROM↓ TO→</th>
-                    {REGIONS.map(r=><th key={r.id} style={{padding:"6px 8px",color:r.color,fontSize:8,borderBottom:`1px solid ${T.border}`,fontWeight:700,minWidth:62}}>{r.flag}{r.name}</th>)}
-                    <th style={{padding:"6px 8px",color:T.gold,fontSize:8,borderBottom:`1px solid ${T.border}`,fontWeight:700}}>총유출</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {REGIONS.map(fr=>{
-                    const rowFlows=REGIONS.map(tr=>{if(fr.id===tr.id)return null;return curFlows.find(f=>f.from===fr.id&&f.to===tr.id)||null;});
-                    const rowTotal=rowFlows.reduce((s,f)=>s+(f?.amt||0),0);
-                    return(
-                      <tr key={fr.id}>
-                        <td style={{padding:"6px 10px",color:fr.color,fontWeight:700,borderBottom:`1px solid ${T.border}22`,whiteSpace:"nowrap"}}>{fr.flag} {fr.name}</td>
-                        {REGIONS.map((tr,i)=>{
-                          const f=rowFlows[i];
-                          if(fr.id===tr.id)return<td key={tr.id} style={{padding:"6px 8px",background:T.dim+"44",borderBottom:`1px solid ${T.border}22`}}>—</td>;
-                          if(!f)return<td key={tr.id} style={{padding:"6px 8px",color:T.dim,textAlign:"right",borderBottom:`1px solid ${T.border}22`}}>·</td>;
-                          const intensity=f.amt/300;const bg=`rgba(0,212,255,${Math.min(intensity*.4,.4)})`;
-                          return(
-                            <td key={tr.id} style={{padding:"6px 8px",background:bg,color:T.accent,fontWeight:700,textAlign:"right",borderBottom:`1px solid ${T.border}22`,borderLeft:`1px solid ${T.border}11`}}>
-                              ${f.amt}
-                            </td>
-                          );
-                        })}
-                        <td style={{padding:"6px 8px",color:T.red,fontWeight:700,textAlign:"right",borderBottom:`1px solid ${T.border}22`,borderLeft:`1px solid ${T.border}`}}>${rowTotal}B</td>
-                      </tr>
-                    );
-                  })}
-                  <tr>
-                    <td style={{padding:"6px 10px",color:T.gold,fontWeight:700,fontSize:8}}>총유입</td>
-                    {REGIONS.map(tr=>{const total=curFlows.filter(f=>f.to===tr.id).reduce((s,f)=>s+f.amt,0);return<td key={tr.id} style={{padding:"6px 8px",color:T.green,fontWeight:700,textAlign:"right",borderTop:`1px solid ${T.border}`}}>{total?`$${total}B`:""}</td>;})}
-                    <td/>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-
-/* ════════════════════════════════════════════════════════════════
-   TAB 4: HEDGE FUNDS
-════════════════════════════════════════════════════════════════ */
 function HedgeFundView(){
   const [sel,setSel]=useState(null);
   const fund=sel?HEDGE_FUNDS.find(f=>f.name===sel):null;
