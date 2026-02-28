@@ -1,0 +1,1460 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+<title>GLOBAL MACRO INTELLIGENCE · v1.0</title>
+<script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;700&family=Space+Grotesk:wght@400;500;700&display=swap" rel="stylesheet"/>
+<style>
+*{box-sizing:border-box;margin:0;padding:0;}
+html,body,#root{min-height:100vh;background:#04060d;color:#c8d4e0;}
+::-webkit-scrollbar{width:4px;height:4px;}
+::-webkit-scrollbar-track{background:#04060d;}
+::-webkit-scrollbar-thumb{background:#1c2535;border-radius:2px;}
+input[type=range]{-webkit-appearance:none;background:transparent;cursor:pointer;width:100%;}
+input[type=range]::-webkit-slider-runnable-track{background:#1c2535;border-radius:3px;height:3px;}
+input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:12px;height:12px;border-radius:50%;background:#00d4ff;margin-top:-4.5px;}
+.btn{padding:4px 11px;border-radius:3px;font-size:10px;font-family:'JetBrains Mono',monospace;cursor:pointer;border:1px solid #1c2535;background:transparent;color:#4a5a6a;transition:all .15s;letter-spacing:.04em;}
+.btn:hover{color:#c8d4e0;border-color:#2a3545;}
+.btn.a{border-color:#00d4ff;background:#00d4ff15;color:#00d4ff;}
+.btn.ga{border-color:#f0b429;background:#f0b42915;color:#f0b429;}
+.btn.ra{border-color:#ff3355;background:#ff335515;color:#ff3355;}
+.btn.pa{border-color:#bb86fc;background:#bb86fc15;color:#bb86fc;}
+@keyframes pulseRing{0%{transform:scale(.85);opacity:.8}100%{transform:scale(1.5);opacity:0}}
+@keyframes flowLine{0%{stroke-dashoffset:100}100%{stroke-dashoffset:0}}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:.3}}
+.blink{animation:blink 1.8s infinite;}
+.mono{font-family:'JetBrains Mono',monospace;}
+.sans{font-family:'Space Grotesk',sans-serif;}
+</style>
+</head>
+<body><div id="root"></div>
+<script type="text/babel">
+const {useState,useEffect,useRef,useMemo,useCallback}=React;
+
+/* ════════════════════════════════════════════════════════════════
+   DESIGN TOKENS
+════════════════════════════════════════════════════════════════ */
+const T={
+  bg:"#04060d",panel:"#080e1a",panel2:"#0c1420",border:"#1c2535",border2:"#243045",
+  accent:"#00d4ff",gold:"#f0b429",green:"#00e676",red:"#ff3355",purple:"#bb86fc",orange:"#ff8c00",
+  teal:"#00bcd4",pink:"#ff4081",lime:"#cddc39",
+  text:"#c8d4e0",muted:"#4a5a6a",dim:"#2a3a4a",
+};
+
+/* ════════════════════════════════════════════════════════════════
+   DATA — 9 REGIONS
+════════════════════════════════════════════════════════════════ */
+const REGIONS=[
+  {
+    id:"us",name:"미국",en:"United States",flag:"🇺🇸",color:"#00d4ff",
+    mapX:0.17,mapY:0.38,mapR:62,
+    gdp:27.4,gdpGrowth:2.8,cpi:3.2,unemploy:3.9,pmi:51.6,
+    policyRate:4.25,rate10y:4.52,rate2y:4.18,currentAcct:-3.1,debtGdp:122,
+    equity:"S&P 4,927",equityChg:+1.2,currency:"USD",
+    fxVsUsd:1.0,fxChg:0,
+    energy:"주요 소비·LNG 수출국",energyRole:"소비+수출",
+    commodity:"달러 기축·금융패권",
+    nextCB:"2025-03-19",cbName:"Fed",stance:"중립→완화",stanceDir:1,
+    geopolRisk:45,tradePower:95,finPower:100,
+    stockMarkets:["S&P500","NASDAQ","DOW","Russell2000"],
+    tvSymbol:"FOREXCOM:SPXUSD",
+    yields:[4.05,4.11,4.18,4.25,4.38,4.52,4.63,4.73],
+    keyEvents:["트럼프 관세 2.0","Fed 피봇 기대","AI 인프라 붐","강달러 사이클"],
+    description:"세계 최대 경제·금융패권국. 달러 기축통화로 글로벌 자금흐름 지배.",
+  },
+  {
+    id:"cn",name:"중국",en:"China",flag:"🇨🇳",color:"#ff3355",
+    mapX:0.77,mapY:0.40,mapR:58,
+    gdp:17.9,gdpGrowth:4.6,cpi:0.4,unemploy:5.1,pmi:50.2,
+    policyRate:3.10,rate10y:2.35,rate2y:2.10,currentAcct:1.8,debtGdp:88,
+    equity:"CSI300 3,512",equityChg:-0.8,currency:"CNY",
+    fxVsUsd:7.24,fxChg:-0.2,
+    energy:"세계 최대 석탄·원유 수입국",energyRole:"최대 소비",
+    commodity:"희토류 85% 장악·배터리 공급망",
+    nextCB:"2025-02-20",cbName:"PBOC",stance:"완화적",stanceDir:1,
+    geopolRisk:82,tradePower:88,finPower:72,
+    stockMarkets:["상하이종합","CSI300","선전성분","항셍"],
+    tvSymbol:"SSE:000001",
+    yields:[1.80,1.92,2.02,2.10,2.20,2.35,2.48,2.62],
+    keyEvents:["부동산 디레버리징","미중 반도체 전쟁","위안화 절하 압력","디플레이션 우려"],
+    description:"세계 2위 경제·제조업 패권. 희토류·배터리 공급망 장악. 미국과 패권 경쟁.",
+  },
+  {
+    id:"jp",name:"일본",en:"Japan",flag:"🇯🇵",color:"#ff8c00",
+    mapX:0.85,mapY:0.35,mapR:44,
+    gdp:4.2,gdpGrowth:1.2,cpi:2.8,unemploy:2.4,pmi:49.0,
+    policyRate:0.50,rate10y:1.05,rate2y:0.38,currentAcct:3.5,debtGdp:264,
+    equity:"Nikkei 38,820",equityChg:+0.5,currency:"JPY",
+    fxVsUsd:149.2,fxChg:+0.8,
+    energy:"세계 최대 LNG 수입국 중 하나",energyRole:"에너지 의존",
+    commodity:"첨단소재·반도체장비 수출",
+    nextCB:"2025-03-19",cbName:"BOJ",stance:"긴축 시작",stanceDir:-1,
+    geopolRisk:30,tradePower:72,finPower:65,
+    stockMarkets:["Nikkei225","TOPIX"],
+    tvSymbol:"INDEX:NKY",
+    yields:[0.08,0.15,0.25,0.38,0.60,1.05,1.35,1.55],
+    keyEvents:["BOJ 금리 정상화","엔화 캐리트레이드 청산","임금 상승","엔저 수출 수혜"],
+    description:"세계 최대 채권국. 엔캐리 트레이드 청산은 글로벌 변동성 폭발 트리거.",
+  },
+  {
+    id:"kr",name:"한국",en:"South Korea",flag:"🇰🇷",color:"#ff9800",
+    mapX:0.82,mapY:0.37,mapR:36,
+    gdp:1.7,gdpGrowth:2.1,cpi:2.0,unemploy:3.0,pmi:49.8,
+    policyRate:2.75,rate10y:3.02,rate2y:2.82,currentAcct:3.2,debtGdp:54,
+    equity:"KOSPI 2,486",equityChg:-0.3,currency:"KRW",
+    fxVsUsd:1368,fxChg:+0.5,
+    energy:"세계 5위 LNG 수입국",energyRole:"에너지 의존",
+    commodity:"반도체(DRAM·HBM) 세계 1위",
+    nextCB:"2025-02-25",cbName:"BOK",stance:"완화 중",stanceDir:1,
+    geopolRisk:48,tradePower:55,finPower:42,
+    stockMarkets:["KOSPI","KOSDAQ"],
+    tvSymbol:"KRX:KOSPI",
+    yields:[2.40,2.58,2.70,2.82,2.95,3.02,3.10,3.18],
+    keyEvents:["코리아 디스카운트","HBM 수요 폭발","외국인 순매도","정치 불확실성"],
+    description:"반도체(삼성·SK하이닉스) AI 인프라의 핵심 공급자. PBR 0.85x 저평가.",
+  },
+  {
+    id:"tw",name:"대만",en:"Taiwan",flag:"🇹🇼",color:"#00e676",
+    mapX:0.80,mapY:0.43,mapR:32,
+    gdp:0.78,gdpGrowth:3.8,cpi:1.8,unemploy:3.5,pmi:52.1,
+    policyRate:2.00,rate10y:1.95,rate2y:1.55,currentAcct:14.2,debtGdp:27,
+    equity:"Taiwan50 1,628",equityChg:+2.1,currency:"TWD",
+    fxVsUsd:31.8,fxChg:-0.1,
+    energy:"에너지 완전 수입 의존",energyRole:"에너지 의존",
+    commodity:"TSMC — 파운드리 세계 1위(90%)",
+    nextCB:"2025-03-27",cbName:"CBC",stance:"중립",stanceDir:0,
+    geopolRisk:72,tradePower:38,finPower:35,
+    stockMarkets:["TAIEX"],
+    tvSymbol:"TWSE:Y9999",
+    yields:[0.90,1.10,1.30,1.55,1.75,1.95,2.10,2.25],
+    keyEvents:["TSMC 지정학 리스크","AI칩 패권","중국 위협 증가","미국 지원"],
+    description:"TSMC = 세계 첨단반도체 생산 80~90%. 지정학적 최고 핫스팟.",
+  },
+  {
+    id:"eu",name:"유럽",en:"Europe (EU)",flag:"🇪🇺",color:"#7c6af5",
+    mapX:0.48,mapY:0.30,mapR:52,
+    gdp:18.4,gdpGrowth:0.8,cpi:2.3,unemploy:6.2,pmi:47.3,
+    policyRate:2.65,rate10y:2.65,rate2y:2.38,currentAcct:2.8,debtGdp:91,
+    equity:"DAX 18,205",equityChg:+0.4,currency:"EUR",
+    fxVsUsd:1.088,fxChg:+0.2,
+    energy:"러시아 에너지 의존 탈피 중",energyRole:"에너지 의존→다변화",
+    commodity:"럭셔리·자동차 수출",
+    nextCB:"2025-03-06",cbName:"ECB",stance:"완화 중",stanceDir:1,
+    geopolRisk:58,tradePower:78,finPower:68,
+    stockMarkets:["DAX","CAC40","FTSE100","MIB","AEX"],
+    tvSymbol:"INDEX:DEU40",
+    yields:[2.05,2.18,2.28,2.38,2.50,2.65,2.78,2.95],
+    keyEvents:["러-우 전쟁 경제 타격","미국 관세 위협","에너지 전환 가속","독일 침체"],
+    description:"세계 최대 단일 시장. 러시아 에너지 이탈 타격 + 미국 관세 위협 이중고.",
+  },
+  {
+    id:"me",name:"중동",en:"Middle East",flag:"🕌",color:"#ffd700",
+    mapX:0.58,mapY:0.48,mapR:40,
+    gdp:3.8,gdpGrowth:3.2,cpi:4.1,unemploy:6.8,pmi:54.2,
+    policyRate:5.50,rate10y:5.20,rate2y:5.10,currentAcct:8.5,debtGdp:35,
+    equity:"TADAWUL 11,250",equityChg:+0.8,currency:"USD-pegged",
+    fxVsUsd:3.75,fxChg:0,
+    energy:"세계 석유 33% + LNG 공급",energyRole:"최대 에너지 공급",
+    commodity:"원유·LNG·국부펀드(SWF)",
+    nextCB:"—",cbName:"SAMA/UAE CB",stance:"Fed 연동",stanceDir:1,
+    geopolRisk:68,tradePower:62,finPower:55,
+    stockMarkets:["TADAWUL(사우디)","DFM(UAE)","카타르QE"],
+    tvSymbol:"INDEX:TASI",
+    yields:[4.80,4.90,5.00,5.10,5.15,5.20,5.25,5.30],
+    keyEvents:["OPEC+ 감산 정책","이스라엘-이란 긴장","비전2030(사우디)","탈석유 다변화"],
+    description:"원유 공급의 핵심. SWF(국부펀드) 약 $3.5T 규모 글로벌 자산 운용.",
+  },
+  {
+    id:"latam",name:"중남미",en:"Latin America",flag:"🌎",color:"#ff6b35",
+    mapX:0.24,mapY:0.62,mapR:42,
+    gdp:5.8,gdpGrowth:2.1,cpi:8.2,unemploy:8.5,pmi:50.4,
+    policyRate:10.50,rate10y:12.8,rate2y:11.2,currentAcct:-1.8,debtGdp:78,
+    equity:"BOVESPA 127,400",equityChg:-1.2,currency:"BRL/MXN",
+    fxVsUsd:4.97,fxChg:+1.5,
+    energy:"브라질 원유·천연가스 신흥",energyRole:"에너지 생산·공급",
+    commodity:"구리(칠레)·리튬(볼리비아·아르헨)·대두(브라질)",
+    nextCB:"2025-03-05",cbName:"BCB/Banxico",stance:"긴축→완화 모색",stanceDir:1,
+    geopolRisk:55,tradePower:42,finPower:35,
+    stockMarkets:["BOVESPA(브라질)","IPC(멕시코)","MERVAL(아르헨)"],
+    tvSymbol:"BMFBOVESPA:IBOV",
+    yields:[10.5,11.2,11.8,12.2,12.5,12.8,13.0,13.2],
+    keyEvents:["리튬 삼각지대 자원 전쟁","달러 강세 부채 부담","중국 자원 투자 확대","미국 근해 리쇼어링"],
+    description:"리튬(EV배터리)·구리(AI인프라)의 핵심 보고. 글로벌 탈탄소화의 열쇠.",
+  },
+  {
+    id:"oceania",name:"오세아니아",en:"Oceania (AUS/NZ)",flag:"🦘",color:"#00bcd4",
+    mapX:0.83,mapY:0.72,mapR:36,
+    gdp:1.7,gdpGrowth:1.5,cpi:3.2,unemploy:4.2,pmi:48.5,
+    policyRate:4.35,rate10y:4.42,rate2y:4.10,currentAcct:-1.2,debtGdp:48,
+    equity:"ASX200 7,820",equityChg:+0.6,currency:"AUD",
+    fxVsUsd:0.64,fxChg:-0.3,
+    energy:"LNG 세계 2위 수출국(호주)",energyRole:"에너지 수출",
+    commodity:"철광석·석탄·리튬·금·LNG",
+    nextCB:"2025-03-04",cbName:"RBA",stance:"완화 시작",stanceDir:1,
+    geopolRisk:22,tradePower:38,finPower:30,
+    stockMarkets:["ASX200"],
+    tvSymbol:"ASX:XJO",
+    yields:[4.00,4.05,4.10,4.15,4.25,4.42,4.55,4.65],
+    keyEvents:["중국 철광석 수요 감소","리튬 공급과잉","AUKUS 방위 협약","인플레 완화 기미"],
+    description:"원자재(철광석·석탄·리튬·LNG) 대중국 수출 의존도 높은 자원 강국.",
+  },
+];
+
+/* ════════════════════════════════════════════════════════════════
+   HEDGE FUND DATA
+════════════════════════════════════════════════════════════════ */
+const HEDGE_FUNDS=[
+  {name:"Bridgewater",aum:"$149B",founder:"Ray Dalio",style:"리스크패리티·거시",
+   positions:[
+     {asset:"금",stance:"LONG",size:85,note:"인플레·지정학 헤지"},
+     {asset:"US채권",stance:"NEUTRAL",size:48,note:"리스크패리티 재조정"},
+     {asset:"신흥시장채권",stance:"LONG",size:62,note:"달러 약세 베팅"},
+     {asset:"중국주식",stance:"UNDERWEIGHT",size:22,note:"지정학 리스크 축소"},
+     {asset:"원자재",stance:"LONG",size:70,note:"인플레이션 헤지"},
+   ],color:"#00d4ff",regime:"인플레이션 헤지 국면"},
+  {name:"Citadel",aum:"$63B",founder:"Ken Griffin",style:"멀티스트래티지·퀀트",
+   positions:[
+     {asset:"미국주식(롱숏)",stance:"NET LONG",size:72,note:"AI·기술주 집중"},
+     {asset:"크레딧",stance:"LONG",size:55,note:"HY 스프레드 수렴"},
+     {asset:"FX 변동성",stance:"SHORT VOL",size:40,note:"VIX 안정 활용"},
+     {asset:"에너지",stance:"NEUTRAL",size:45,note:"OPEC 불확실성"},
+     {asset:"반도체",stance:"OVERWEIGHT",size:88,note:"AI 수요 지속"},
+   ],color:"#ff3355",regime:"리스크온·알파 추구"},
+  {name:"Renaissance",aum:"$55B",founder:"Jim Simons",style:"퀀트·통계적차익",
+   positions:[
+     {asset:"단기 모멘텀",stance:"LONG",size:80,note:"트렌드 팔로잉"},
+     {asset:"통계적 차익",stance:"ACTIVE",size:90,note:"패턴 인식"},
+     {asset:"파생상품",stance:"COMPLEX",size:75,note:"옵션 전략"},
+     {asset:"FX",stance:"ACTIVE",size:65,note:"단기 FX 트레이딩"},
+     {asset:"원자재",stance:"LONG",size:58,note:"시즈널리티 패턴"},
+   ],color:"#bb86fc",regime:"퀀트 모멘텀"},
+  {name:"Two Sigma",aum:"$58B",founder:"John Overdeck",style:"데이터·AI 기반",
+   positions:[
+     {asset:"AI·테크",stance:"OVERWEIGHT",size:85,note:"AI 테마 집중"},
+     {asset:"글로벌 매크로",stance:"NEUTRAL",size:50,note:"데이터 기반 중립"},
+     {asset:"크립토",stance:"SELECTIVE",size:35,note:"규제 리스크 감안"},
+     {asset:"의료·바이오",stance:"LONG",size:62,note:"AI 신약 개발"},
+     {asset:"에너지 전환",stance:"LONG",size:70,note:"재생에너지 확대"},
+   ],color:"#00e676",regime:"AI 테마 주도"},
+  {name:"Millennium",aum:"$68B",founder:"Izzy Englander",style:"멀티매니저·차익",
+   positions:[
+     {asset:"멀티스트래티지",stance:"DIVERSIFIED",size:88,note:"분산 포드 운영"},
+     {asset:"합병 차익",stance:"ACTIVE",size:55,note:"M&A 파이프라인"},
+     {asset:"전환사채",stance:"LONG",size:62,note:"변동성 활용"},
+     {asset:"아시아 주식",stance:"SELECTIVE",size:45,note:"한국·대만 반도체"},
+     {asset:"글로벌 채권",stance:"DURATION",size:58,note:"금리 정상화 수혜"},
+   ],color:"#f0b429",regime:"차익·분산"},
+  {name:"Baupost",aum:"$27B",founder:"Seth Klarman",style:"가치투자·특수상황",
+   positions:[
+     {asset:"저평가 주식",stance:"DEEP VALUE",size:75,note:"코리아 디스카운트 주목"},
+     {asset:"부실채권",stance:"OPPORTUNISTIC",size:60,note:"중국 부동산 관련"},
+     {asset:"달러 현금",stance:"HIGH CASH",size:85,note:"기회 대기 중"},
+     {asset:"글로벌 분산",stance:"LONG",size:55,note:"지리적 분산"},
+     {asset:"특수상황",stance:"ACTIVE",size:65,note:"구조조정 기회"},
+   ],color:"#ff8c00",regime:"안전 우선·가치"},
+  {name:"Soros Fund",aum:"$25B",founder:"George Soros",style:"글로벌 매크로",
+   positions:[
+     {asset:"FX 주요통화",stance:"ACTIVE",size:70,note:"달러 약세 베팅"},
+     {asset:"신흥시장",stance:"CAUTIOUS",size:38,note:"지정학 리스크"},
+     {asset:"유럽주식",stance:"UNDERWEIGHT",size:30,note:"성장 둔화 우려"},
+     {asset:"금",stance:"LONG",size:72,note:"달러 헤지"},
+     {asset:"미국 단기채",stance:"LONG",size:80,note:"고금리 활용"},
+   ],color:"#ff4081",regime:"글로벌 매크로·FX"},
+  {name:"Pershing Square",aum:"$18B",founder:"Bill Ackman",style:"액티비스트·집중투자",
+   positions:[
+     {asset:"US 대형주",stance:"CONCENTRATED",size:78,note:"소수 종목 집중"},
+     {asset:"금리 옵션",stance:"LONG RATES",size:68,note:"금리 상승 베팅"},
+     {asset:"레스토랑체인",stance:"LONG",size:55,note:"소비자 회복"},
+     {asset:"USD",stance:"LONG",size:65,note:"달러 강세 유지"},
+     {asset:"액티비스트",stance:"ACTIVE",size:80,note:"기업 경영 개입"},
+   ],color:"#cddc39",regime:"집중·액티비스트"},
+];
+
+/* ════════════════════════════════════════════════════════════════
+   CAPITAL FLOWS (지역간 자금 이동)
+════════════════════════════════════════════════════════════════ */
+function buildMonths(n=24){
+  const now=new Date(),arr=[];
+  for(let i=n-1;i>=0;i--){
+    const d=new Date(now.getFullYear(),now.getMonth()-i,1);
+    arr.push({label:`${d.getFullYear()}.${String(d.getMonth()+1).padStart(2,'0')}`,mo:d.getMonth(),yr:d.getFullYear()});
+  }
+  return arr;
+}
+const MONTHS=buildMonths(24);
+
+function sr(seed){let s=seed%2147483647;if(s<=0)s+=2147483646;return()=>{s=s*16807%2147483647;return(s-1)/2147483646;};}
+function genFlow(base,phase,trend,n=24){
+  const r=sr(Math.round(base*100+phase*10));
+  return Array.from({length:n},(_,i)=>Math.round(Math.max(5,base+Math.sin((i/12)*2*Math.PI+phase)*base*.22+(i/n)*trend+(r()-.5)*base*.1)));
+}
+
+const FLOWS=[
+  {from:"me",  to:"us",   base:280,phase:.2,  trend:+20, label:"오일달러 재투자",    tier:"xl",color:T.gold},
+  {from:"cn",  to:"us",   base:240,phase:.8,  trend:-40, label:"미국채 보유(감소)", tier:"xl",color:"#ff3355"},
+  {from:"us",  to:"kr",   base:180,phase:.4,  trend:+30, label:"반도체 투자 확대",  tier:"lg",color:T.accent},
+  {from:"us",  to:"tw",   base:165,phase:.6,  trend:+25, label:"TSMC 자본 유입",    tier:"lg",color:T.green},
+  {from:"jp",  to:"us",   base:210,phase:1.2, trend:-15, label:"엔캐리 청산 위험",  tier:"lg",color:T.orange},
+  {from:"eu",  to:"us",   base:155,phase:.3,  trend:+10, label:"성장 격차→미국행", tier:"lg",color:"#7c6af5"},
+  {from:"me",  to:"eu",   base:120,phase:.9,  trend: +5, label:"SWF 유럽 투자",     tier:"md",color:T.gold},
+  {from:"latam",to:"us",  base: 95,phase:1.5, trend: -5, label:"달러화 안전자산",   tier:"md",color:"#ff6b35"},
+  {from:"cn",  to:"latam",base: 85,phase:.7,  trend:+20, label:"중국 자원 투자",    tier:"md",color:"#ff3355"},
+  {from:"oceania",to:"cn",base: 70,phase:1.1, trend:-10, label:"철광석·LNG 수출",   tier:"md",color:T.teal},
+  {from:"cn",  to:"eu",   base: 78,phase:.5,  trend: -8, label:"일대일로 투자",      tier:"md",color:"#ff3355"},
+  {from:"us",  to:"me",   base: 60,phase:.8,  trend: +5, label:"달러 페그 지원",    tier:"sm",color:T.accent},
+  {from:"kr",  to:"us",   base: 55,phase:2.0, trend:-12, label:"외국인 순매도",     tier:"sm",color:T.orange},
+  {from:"eu",  to:"cn",   base: 48,phase:.4,  trend: -8, label:"무역 결제",         tier:"sm",color:"#7c6af5"},
+  {from:"me",  to:"cn",   base: 72,phase:1.3, trend:+15, label:"에너지 대중국 수출", tier:"md",color:T.gold},
+  {from:"jp",  to:"latam",base: 42,phase:1.8, trend: +8, label:"일본 인프라 투자",   tier:"sm",color:T.orange},
+].map(f=>({...f,amounts:genFlow(f.base,f.phase,f.trend,24)}));
+
+/* ════════════════════════════════════════════════════════════════
+   MACRO CHAIN DATA (연결 고리)
+════════════════════════════════════════════════════════════════ */
+const CHAIN_NODES=[
+  {id:"cb",  label:"중앙은행",    sub:"금리 결정",  x:.18,y:.25,color:T.purple,icon:"🏛"},
+  {id:"mktrate",label:"시장금리", sub:"국채수익률", x:.36,y:.18,color:T.accent,icon:"📈"},
+  {id:"fx",  label:"환율",        sub:"FX 시장",    x:.55,y:.25,color:T.green, icon:"💱"},
+  {id:"infl",label:"인플레이션",  sub:"물가·CPI",   x:.18,y:.50,color:T.red,  icon:"🔥"},
+  {id:"empl",label:"고용·성장",   sub:"GDP·실업",  x:.18,y:.75,color:T.lime, icon:"👥"},
+  {id:"geo", label:"지정학",      sub:"패권·전쟁",  x:.55,y:.50,color:"#ff8c00",icon:"🌏"},
+  {id:"tariff",label:"관세·규제", sub:"무역정책",   x:.73,y:.38,color:"#ff6b35",icon:"⚖️"},
+  {id:"energy",label:"에너지",    sub:"WTI·가스·석탄",x:.36,y:.62,color:T.gold,icon:"⚡"},
+  {id:"minerals",label:"원자재",  sub:"구리·희토류·리튬",x:.55,y:.75,color:"#b87333",icon:"⛏"},
+  {id:"equity",label:"주식시장",  sub:"선물·옵션",  x:.82,y:.55,color:T.accent,icon:"📊"},
+  {id:"bonds",label:"채권시장",   sub:"국채·회사채",x:.73,y:.75,color:T.green, icon:"📋"},
+  {id:"crypto",label:"암호화폐",  sub:"BTC·ETH",   x:.82,y:.82,color:"#ff6b6b",icon:"₿"},
+];
+
+const CHAIN_EDGES=[
+  {from:"cb",   to:"mktrate",label:"금리 전달",         weight:3,color:T.purple,desc:"기준금리 결정→국채수익률 파급"},
+  {from:"mktrate",to:"fx",   label:"금리차→환율",       weight:3,color:T.accent,desc:"금리차 확대→고금리 통화 강세"},
+  {from:"cb",   to:"infl",   label:"금리↔인플레",       weight:2,color:T.red,   desc:"금리 인상→인플레 억제"},
+  {from:"infl", to:"cb",     label:"인플레→금리결정",   weight:2,color:T.red,   desc:"인플레 지표로 금리 결정"},
+  {from:"empl", to:"cb",     label:"고용→금리결정",     weight:2,color:T.lime,  desc:"실업률·임금→Fed 이중책무"},
+  {from:"geo",  to:"tariff", label:"패권→관세",         weight:3,color:"#ff8c00",desc:"미중 패권전쟁→관세·제재"},
+  {from:"tariff",to:"infl",  label:"관세→인플레",       weight:2,color:"#ff6b35",desc:"관세 부과→수입물가 상승"},
+  {from:"geo",  to:"energy", label:"지정학→에너지가격", weight:3,color:"#ff8c00",desc:"분쟁·제재→유가·가스 급등"},
+  {from:"energy",to:"infl",  label:"에너지→인플레",     weight:2,color:T.gold,  desc:"유가 상승→전반적 물가 압력"},
+  {from:"minerals",to:"equity",label:"희토류→반도체",   weight:2,color:"#b87333",desc:"원자재 공급→기업 생산비"},
+  {from:"fx",   to:"equity", label:"환율→주식",         weight:2,color:T.green, desc:"통화 강세→수출기업 실적"},
+  {from:"mktrate",to:"bonds",label:"금리→채권",         weight:3,color:T.accent,desc:"금리 상승→채권 가격 하락"},
+  {from:"mktrate",to:"equity",label:"금리→주식밸류에이션",weight:2,color:T.accent,desc:"할인율 변화→주가 조정"},
+  {from:"equity",to:"crypto",label:"리스크온→크립토",   weight:2,color:T.accent,desc:"위험 선호도→BTC 연동"},
+  {from:"geo",  to:"minerals",label:"희토류 전쟁",      weight:3,color:"#ff8c00",desc:"중국 희토류 수출규제·자원무기화"},
+  {from:"tariff",to:"fx",    label:"관세→환율",         weight:2,color:"#ff6b35",desc:"무역전쟁→통화 절하 경쟁"},
+];
+
+/* ════════════════════════════════════════════════════════════════
+   WORLD MAP PATHS
+════════════════════════════════════════════════════════════════ */
+const MAP_PATHS=[
+  {d:"M 65,80 L 88,65 L 112,62 L 142,67 L 172,75 L 192,82 L 214,88 L 236,98 L 255,108 L 260,122 L 252,138 L 240,152 L 225,170 L 208,192 L 196,210 L 186,222 L 172,228 L 156,224 L 142,210 L 128,200 L 112,182 L 98,164 L 82,144 L 68,120 L 58,100 Z",fill:"#0e1e32",stroke:"#1e3050"},
+  {d:"M 186,230 L 202,224 L 218,230 L 222,242 L 210,248 L 196,238 Z",fill:"#0e1e32",stroke:"#1e3050"},
+  {d:"M 190,252 L 222,246 L 252,254 L 270,272 L 278,302 L 274,338 L 262,374 L 242,408 L 220,424 L 198,420 L 180,406 L 168,372 L 160,336 L 158,298 L 164,268 L 178,254 Z",fill:"#0e1e32",stroke:"#1e3050"},
+  {d:"M 232,28 L 268,22 L 292,34 L 298,56 L 278,68 L 250,70 L 230,56 Z",fill:"#0c1828",stroke:"#162440"},
+  {d:"M 428,65 L 462,58 L 494,62 L 524,70 L 542,82 L 546,98 L 532,112 L 512,122 L 490,128 L 466,124 L 446,112 L 432,96 L 425,80 Z",fill:"#0e1e32",stroke:"#1e3050"},
+  {d:"M 465,44 L 488,38 L 512,44 L 518,58 L 496,64 L 470,62 Z",fill:"#0c1828",stroke:"#162440"},
+  {d:"M 450,156 L 492,150 L 532,152 L 564,162 L 586,186 L 592,220 L 588,262 L 572,316 L 550,366 L 524,406 L 498,418 L 472,412 L 448,382 L 432,336 L 426,286 L 424,236 L 430,194 L 438,168 Z",fill:"#0e1e32",stroke:"#1e3050"},
+  {d:"M 558,155 L 596,150 L 618,162 L 622,184 L 602,200 L 574,204 L 556,190 L 548,170 Z",fill:"#0c1828",stroke:"#162440"},
+  {d:"M 535,34 L 625,24 L 728,18 L 830,22 L 890,36 L 918,58 L 908,82 L 872,96 L 832,104 L 790,108 L 748,106 L 710,102 L 668,98 L 630,94 L 592,88 L 556,80 L 534,66 Z",fill:"#0e1e32",stroke:"#1e3050"},
+  {d:"M 610,110 L 664,114 L 708,120 L 748,128 L 778,142 L 788,162 L 770,180 L 742,190 L 706,192 L 668,186 L 636,174 L 614,158 L 608,138 Z",fill:"#0e1e32",stroke:"#1e3050"},
+  {d:"M 636,162 L 670,158 L 696,166 L 706,190 L 700,220 L 680,244 L 658,248 L 636,236 L 622,212 L 618,188 L 626,172 Z",fill:"#0c1828",stroke:"#162440"},
+  {d:"M 748,172 L 782,166 L 806,176 L 814,198 L 802,216 L 774,220 L 750,208 L 740,190 Z",fill:"#0c1828",stroke:"#162440"},
+  {d:"M 760,92 L 844,88 L 884,98 L 894,118 L 876,136 L 844,142 L 808,138 L 776,128 L 756,112 Z",fill:"#0e1e32",stroke:"#1e3050"},
+  {d:"M 878,90 L 898,86 L 910,100 L 902,116 L 884,118 L 870,105 Z",fill:"#0c1828",stroke:"#162440"},
+  {d:"M 752,302 L 824,292 L 868,300 L 888,326 L 886,364 L 862,392 L 826,406 L 786,398 L 758,374 L 742,340 L 740,316 Z",fill:"#0e1e32",stroke:"#1e3050"},
+  {d:"M 906,358 L 922,350 L 932,366 L 922,380 L 908,374 Z",fill:"#0c1828",stroke:"#162440"},
+];
+
+
+/* ════════════════════════════════════════════════════════════════
+   UTILITY COMPONENTS
+════════════════════════════════════════════════════════════════ */
+function TV({type,opts,height}){
+  const ref=useRef(null);const uid=useRef("tv_"+Math.random().toString(36).slice(2));
+  useEffect(()=>{
+    if(!ref.current)return;ref.current.innerHTML="";
+    const w=document.createElement("div");w.id=uid.current;ref.current.appendChild(w);
+    const s=document.createElement("script");s.src=`https://s3.tradingview.com/external-embedding/embed-widget-${type}.js`;s.async=true;
+    s.innerHTML=JSON.stringify({...opts,container_id:uid.current,width:"100%",height,colorTheme:"dark",locale:"kr",isTransparent:true});
+    w.appendChild(s);return()=>{if(ref.current)ref.current.innerHTML="";};
+  },[]);
+  return <div ref={ref} style={{width:"100%",height,overflow:"hidden"}}/>;
+}
+
+function Spark({data,width=80,height=26}){
+  if(!data||data.length<2)return null;
+  const mn=Math.min(...data),mx=Math.max(...data),rng=mx-mn||1;
+  const pts=data.map((v,i)=>`${(i/(data.length-1))*width},${height-((v-mn)/rng)*(height-4)-2}`).join(" ");
+  const up=data[data.length-1]>=data[0];const lc=up?T.green:T.red;
+  return(
+    <svg width={width} height={height} style={{display:"block",flexShrink:0}}>
+      <polyline points={pts} fill="none" stroke={lc} strokeWidth="1.5" strokeLinejoin="round" strokeLinecap="round"/>
+      <circle cx={(data.length-1)/(data.length-1)*width} cy={height-((data[data.length-1]-mn)/rng)*(height-4)-2} r="2.5" fill={lc}/>
+    </svg>
+  );
+}
+
+function ScoreRing({score,size=48,label}){
+  const col=score>65?T.green:score>45?T.gold:T.red;
+  const r=size/2-5,circ=2*Math.PI*r,dash=(score/100)*circ;
+  return(
+    <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:2}}>
+      <svg width={size} height={size}>
+        <circle cx={size/2} cy={size/2} r={r} fill="none" stroke={T.dim} strokeWidth="3.5"/>
+        <circle cx={size/2} cy={size/2} r={r} fill="none" stroke={col} strokeWidth="3.5"
+          strokeDasharray={`${dash} ${circ}`} strokeDashoffset={circ/4} strokeLinecap="round"/>
+        <text x={size/2} y={size/2+4} textAnchor="middle" fill={col} fontSize={size>44?"11":"9"} fontWeight="700" fontFamily="JetBrains Mono">{score}</text>
+      </svg>
+      {label&&<span style={{fontSize:7,color:T.muted,fontFamily:"JetBrains Mono",textAlign:"center"}}>{label}</span>}
+    </div>
+  );
+}
+
+function Panel({title,accent,badge,children,style}){
+  const ac=accent||T.accent;
+  return(
+    <div style={{background:T.panel,border:`1px solid ${T.border}`,borderRadius:6,overflow:"hidden",...style}}>
+      <div style={{padding:"7px 14px",borderBottom:`1px solid ${T.border}`,display:"flex",justifyContent:"space-between",alignItems:"center",background:T.panel2}}>
+        <div style={{display:"flex",alignItems:"center",gap:8}}>
+          <div style={{width:2.5,height:16,background:ac,borderRadius:2,flexShrink:0}}/>
+          <span style={{fontFamily:"Space Grotesk",fontSize:11,fontWeight:700,color:ac,letterSpacing:".08em",textTransform:"uppercase"}}>{title}</span>
+        </div>
+        {badge}
+      </div>
+      {children}
+    </div>
+  );
+}
+
+function Badge({children,color}){
+  const c=color||T.muted;
+  return <span style={{fontSize:8,color:c,background:c+"20",padding:"2px 8px",borderRadius:2,fontFamily:"JetBrains Mono",fontWeight:700,border:`1px solid ${c}44`}}>{children}</span>;
+}
+
+/* ════════════════════════════════════════════════════════════════
+   TAB 1: WORLD MAP — 9개 지역 + 자금흐름
+════════════════════════════════════════════════════════════════ */
+function WorldMapView(){
+  const [moIdx,setMoIdx]=useState(MONTHS.length-1);
+  const [playing,setPlaying]=useState(false);
+  const [speed,setSpeed]=useState(1.0);
+  const [selRegion,setSelRegion]=useState(null);
+  const [hover,setHover]=useState(null);
+  const [tick,setTick]=useState(0);
+  const playRef=useRef(null);
+  const pRef=useRef([]);
+
+  useEffect(()=>{if(playing){playRef.current=setInterval(()=>setMoIdx(m=>(m+1)%MONTHS.length),Math.round(1000/speed));}return()=>clearInterval(playRef.current);},[playing,speed]);
+  useEffect(()=>{const iv=setInterval(()=>setTick(t=>t+1),55);return()=>clearInterval(iv);},[]);
+
+  const flows=useMemo(()=>FLOWS.map(f=>({...f,amt:f.amounts[moIdx]})),[moIdx]);
+  const maxAmt=useMemo(()=>Math.max(...flows.map(f=>f.amt)),[flows]);
+  const curMo=MONTHS[moIdx];
+
+  // Particle system
+  const particles=useRef([]);
+  useEffect(()=>{
+    particles.current=flows.flatMap((f,fi)=>{
+      const cnt=f.tier==="xl"?14:f.tier==="lg"?9:f.tier==="md"?6:4;
+      const normW=f.amt/maxAmt;
+      return Array.from({length:Math.round(cnt*(0.4+normW*.8))},(_,i)=>({
+        id:`${fi}-${i}-${moIdx}`,from:f.from,to:f.to,color:f.color,
+        speed:(.04+Math.random()*.08)*speed*(0.5+normW*.7),
+        maxR:(f.tier==="xl"?7:f.tier==="lg"?5:f.tier==="md"?3.5:2.2)*(0.5+normW*.6),
+        startProg:Math.random(),opacity:.5+normW*.45,
+      }));
+    });
+  },[moIdx,speed]);
+
+  function nodePos(rid){const r=REGIONS.find(x=>x.id===rid);return r?{x:r.mapX,y:r.mapY}:{x:.5,y:.5};}
+
+  function FloatParticle({p}){
+    const prog=useRef(p.startProg);const[pos,setPos]=useState(p.startProg);
+    useEffect(()=>{let raf,last=performance.now();const t=now=>{prog.current=(prog.current+(now-last)/1000*p.speed)%1;last=now;setPos(prog.current);raf=requestAnimationFrame(t);};raf=requestAnimationFrame(t);return()=>cancelAnimationFrame(raf);},[p.speed]);
+    const f=nodePos(p.from),t=nodePos(p.to);
+    const cx=f.x+(t.x-f.x)*pos,cy=f.y+(t.y-f.y)*pos;
+    const r=p.maxR*(0.3+(1-Math.abs(pos-.5)*2)*.7);
+    return <circle cx={`${cx*100}%`} cy={`${cy*100}%`} r={r} fill={p.color} opacity={p.opacity*(0.3+pos*.7)}/>;
+  }
+
+  const tierW={xl:4.5,lg:3.2,md:2.0,sm:1.2};
+
+  return(
+    <div style={{display:"flex",flexDirection:"column",height:"100%"}}>
+      {/* 컨트롤 바 */}
+      <div style={{padding:"8px 14px",background:T.panel2,borderBottom:`1px solid ${T.border}`,display:"flex",alignItems:"center",gap:12,flexWrap:"wrap"}}>
+        <button onClick={()=>setPlaying(p=>!p)} style={{width:32,height:32,borderRadius:"50%",border:`1px solid ${playing?T.accent:T.border}`,background:playing?T.accent+"20":"transparent",color:playing?T.accent:T.muted,fontSize:12,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>
+          {playing?"⏸":"▶"}
+        </button>
+        <div style={{flex:1,minWidth:180}}>
+          <div style={{display:"flex",justifyContent:"space-between",marginBottom:3}}>
+            {MONTHS.filter((_,i)=>i%4===0).map((m,i)=><span key={i} style={{fontSize:7.5,color:T.muted,fontFamily:"JetBrains Mono"}}>{m.label.slice(2)}</span>)}
+          </div>
+          <input type="range" min="0" max={MONTHS.length-1} value={moIdx} onChange={e=>{setMoIdx(+e.target.value);setPlaying(false);}}/>
+        </div>
+        <div style={{textAlign:"center",flexShrink:0}}>
+          <div style={{fontSize:14,fontWeight:700,color:T.accent,fontFamily:"Space Grotesk"}}>{curMo.label}</div>
+          <div style={{fontSize:8,color:T.muted,fontFamily:"JetBrains Mono"}}>
+            총 흐름: <span style={{color:T.gold,fontWeight:700}}>${(flows.reduce((s,f)=>s+f.amt,0)/1000).toFixed(2)}T</span>
+          </div>
+        </div>
+        <div style={{flexShrink:0,minWidth:90}}>
+          <div style={{display:"flex",justifyContent:"space-between",fontSize:8,color:T.muted,fontFamily:"JetBrains Mono",marginBottom:2}}>
+            <span>속도</span><span style={{color:T.gold}}>{speed.toFixed(1)}×</span>
+          </div>
+          <input type="range" className="gold" min=".3" max="5" step=".1" value={speed} onChange={e=>setSpeed(+e.target.value)}/>
+        </div>
+      </div>
+
+      <div style={{flex:1,display:"flex",minHeight:0}}>
+        {/* 지도 */}
+        <div style={{flex:1,position:"relative",overflow:"hidden"}}>
+          <svg width="100%" height="100%" viewBox="0 0 960 490" preserveAspectRatio="xMidYMid meet" style={{display:"block"}}>
+            <defs>
+              <radialGradient id="bgG" cx="50%" cy="45%" r="70%">
+                <stop offset="0%" stopColor="#080e20"/><stop offset="100%" stopColor="#04060d"/>
+              </radialGradient>
+              <filter id="glow"><feGaussianBlur stdDeviation="3.5" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+              <filter id="glowXL"><feGaussianBlur stdDeviation="6" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+              <filter id="nodeglow"><feGaussianBlur stdDeviation="8" in="SourceGraphic" result="b"/><feComposite in="SourceGraphic" in2="b" operator="over"/></filter>
+            </defs>
+            <rect width="960" height="490" fill="url(#bgG)"/>
+            {/* 격자 */}
+            {[120,240,360,480,600,720,840].map(v=><line key={`gv${v}`} x1={v} y1="0" x2={v} y2="490" stroke="#0a1428" strokeWidth=".5"/>)}
+            {[98,196,294,392].map(v=><line key={`gh${v}`} x1="0" y1={v} x2="960" y2={v} stroke="#0a1428" strokeWidth=".5"/>)}
+            {/* 대륙 */}
+            {MAP_PATHS.map((p,i)=><path key={i} d={p.d} fill={p.fill} stroke={p.stroke} strokeWidth=".8" opacity=".9"/>)}
+            {/* 적도 */}
+            <line x1="0" y1="245" x2="960" y2="245" stroke="#122040" strokeWidth=".8" strokeDasharray="8 8" opacity=".6"/>
+
+            {/* 자금흐름 엣지 */}
+            {flows.map(f=>{
+              const fr=REGIONS.find(r=>r.id===f.from),tr=REGIONS.find(r=>r.id===f.to);
+              if(!fr||!tr)return null;
+              const x1=fr.mapX*960,y1=fr.mapY*490,x2=tr.mapX*960,y2=tr.mapY*490;
+              const mx=(x1+x2)/2+(y2-y1)*.22,my=(y1+y2)/2-(x2-x1)*.22;
+              const dPath=`M${x1},${y1} Q${mx},${my} ${x2},${y2}`;
+              const w=tierW[f.tier]*(0.4+(f.amt/maxAmt)*.9);
+              const isH=hover===`${f.from}-${f.to}`;
+              return(
+                <g key={`${f.from}-${f.to}`}
+                  onMouseEnter={()=>setHover(`${f.from}-${f.to}`)}
+                  onMouseLeave={()=>setHover(null)}
+                  style={{cursor:"pointer"}}>
+                  {(f.tier==="xl"||isH)&&<path d={dPath} stroke={f.color} strokeWidth={w*4} strokeOpacity=".06" fill="none" filter="url(#glowXL)"/>}
+                  <path d={dPath} stroke={isH?f.color:f.color} strokeWidth={w}
+                    strokeOpacity={isH?.95:.2+(f.amt/maxAmt)*.5} fill="none"
+                    strokeDasharray={f.tier==="xl"?"none":f.tier==="lg"?"10 4":"6 6"}/>
+                  <text x={mx} y={my} textAnchor="middle" dy="-7"
+                    fill={f.color} fontSize={isH?10:9} fontWeight="700" fontFamily="JetBrains Mono" opacity={isH?1:.8}
+                    filter={f.tier==="xl"||isH?"url(#glow)":"none"}>
+                    ${f.amt}B
+                  </text>
+                  {isH&&<text x={mx} y={my} textAnchor="middle" dy="5" fill="#fff" fontSize="8" fontFamily="JetBrains Mono" opacity=".75">{f.label}</text>}
+                </g>
+              );
+            })}
+
+            {/* 파티클 */}
+            {particles.current.map(p=><FloatParticle key={p.id} p={p}/>)}
+
+            {/* 지역 노드 */}
+            {REGIONS.map(r=>{
+              const px=r.mapX*960,py=r.mapY*490;
+              const pulse=Math.sin(tick*.055+r.mapX*9)*.12+.88;
+              const inFlow=flows.filter(f=>f.to===r.id).reduce((s,f)=>s+f.amt,0);
+              const outFlow=flows.filter(f=>f.from===r.id).reduce((s,f)=>s+f.amt,0);
+              const net=inFlow-outFlow;
+              const isSel=selRegion===r.id;
+              const nc=net>40?T.green:net<-40?T.red:r.color;
+              return(
+                <g key={r.id} onClick={()=>setSelRegion(p=>p===r.id?null:r.id)} style={{cursor:"pointer"}}>
+                  <circle cx={px} cy={py} r={r.mapR*pulse*1.18} fill={r.color} opacity=".035"/>
+                  {isSel&&<circle cx={px} cy={py} r={r.mapR*.8} fill="none" stroke={r.color} strokeWidth="2" opacity=".5" strokeDasharray="4 3"/>}
+                  <circle cx={px} cy={py} r={r.mapR*.55} fill={r.color} opacity=".07" filter="url(#nodeglow)"/>
+                  <circle cx={px} cy={py} r={r.mapR*.42} fill={T.panel2} stroke={r.color} strokeWidth={isSel?2.5:1.8} strokeOpacity={isSel?1:.7}/>
+                  <text x={px} y={py-3} textAnchor="middle" fill={r.color} fontSize={r.mapR*.22+6} fontWeight="700" fontFamily="JetBrains Mono">{r.flag}</text>
+                  <text x={px} y={py+10} textAnchor="middle" fill={r.color} fontSize="9" fontWeight="700" fontFamily="JetBrains Mono">{r.name}</text>
+                  <text x={px} y={py+21} textAnchor="middle" fill={nc} fontSize="8" fontWeight="700" fontFamily="JetBrains Mono">
+                    {net>10?`+${Math.round(net)}B`:net<-10?`${Math.round(net)}B`:""}
+                  </text>
+                </g>
+              );
+            })}
+
+            {/* 범례 */}
+            <rect x="6" y="6" width="128" height="60" rx="4" fill="#04060d" opacity=".92"/>
+            <text x="14" y="20" fill={T.muted} fontSize="9" fontFamily="JetBrains Mono" fontWeight="700">자금 규모</text>
+            {[["XL",">$200B","#ff3355",4.5],["LG","$100~200B","#ff9800",3.2],["MD","$50~100B","#f0b429",2.0],["SM","<$50B","#00e676",1.2]].map(([tier,rng,col,w],i)=>(
+              <g key={tier} transform={`translate(10,${28+i*10})`}>
+                <line x1="0" y1="4" x2="26" y2="4" stroke={col} strokeWidth={w} opacity=".8"/>
+                <circle cx="26" cy="4" r={w+1} fill={col} opacity=".8"/>
+                <text x="32" y="8" fill={col} fontSize="8" fontFamily="JetBrains Mono">{tier}: {rng}</text>
+              </g>
+            ))}
+          </svg>
+        </div>
+
+        {/* 사이드: 선택 지역 상세 */}
+        <div style={{width:240,borderLeft:`1px solid ${T.border}`,overflowY:"auto",background:T.panel2}}>
+          {selRegion?(()=>{
+            const r=REGIONS.find(x=>x.id===selRegion);if(!r)return null;
+            const rFlows=flows.filter(f=>f.from===r.id||f.to===r.id).sort((a,b)=>b.amt-a.amt);
+            const inFlow=flows.filter(f=>f.to===r.id).reduce((s,f)=>s+f.amt,0);
+            const outFlow=flows.filter(f=>f.from===r.id).reduce((s,f)=>s+f.amt,0);
+            const hs=Math.round(
+              (r.gdpGrowth>2?12:r.gdpGrowth>0?5:-8)+
+              (r.cpi<2.5&&r.cpi>0?10:r.cpi<4?4:-8)+
+              (r.unemploy<4?12:r.unemploy<6?5:-6)+
+              (r.pmi>52?10:r.pmi>50?4:-5)+
+              (r.currentAcct>0?8:-4)+50
+            );
+            return(
+              <div style={{padding:"12px 10px"}}>
+                <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:10}}>
+                  <span style={{fontSize:26}}>{r.flag}</span>
+                  <div><div style={{fontSize:14,color:r.color,fontWeight:700,fontFamily:"Space Grotesk"}}>{r.name}</div>
+                  <div style={{fontSize:8,color:T.muted,fontFamily:"JetBrains Mono"}}>{r.en}</div></div>
+                  <ScoreRing score={hs} size={42}/>
+                </div>
+                <div style={{fontSize:8,color:T.muted,fontFamily:"JetBrains Mono",marginBottom:10,lineHeight:1.6}}>{r.description}</div>
+
+                {/* 핵심 지표 */}
+                {[{l:"GDP 성장",v:`${r.gdpGrowth}%`,g:r.gdpGrowth>1.5},{l:"CPI",v:`${r.cpi}%`,g:r.cpi<3},{l:"실업률",v:`${r.unemploy}%`,g:r.unemploy<5},{l:"PMI",v:r.pmi,g:r.pmi>50},{l:"기준금리",v:`${r.policyRate}%`,g:true},{l:"10Y금리",v:`${r.rate10y}%`,g:true},{l:"경상수지",v:`${r.currentAcct}%`,g:r.currentAcct>0}].map(item=>(
+                  <div key={item.l} style={{display:"flex",justifyContent:"space-between",padding:"4px 6px",background:T.panel,borderRadius:3,marginBottom:2}}>
+                    <span style={{fontSize:8,color:T.muted,fontFamily:"JetBrains Mono"}}>{item.l}</span>
+                    <span style={{fontSize:9,fontWeight:700,color:item.g?T.green:T.red,fontFamily:"JetBrains Mono"}}>{item.v}</span>
+                  </div>
+                ))}
+
+                {/* 자금 흐름 */}
+                <div style={{marginTop:8,marginBottom:5}}>
+                  <div style={{display:"flex",justifyContent:"space-between",fontSize:8,fontFamily:"JetBrains Mono",fontWeight:700,marginBottom:4}}>
+                    <span style={{color:T.green}}>유입 +${inFlow}B</span>
+                    <span style={{color:T.red}}>유출 -${outFlow}B</span>
+                  </div>
+                  {rFlows.slice(0,5).map((f,i)=>{
+                    const isIn=f.to===r.id;
+                    const other=REGIONS.find(x=>x.id===(isIn?f.from:f.to));
+                    return(
+                      <div key={i} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"4px 6px",background:T.panel,borderRadius:3,marginBottom:2,border:`1px solid ${isIn?T.green:T.red}22`}}>
+                        <div style={{fontSize:8,color:T.text,fontFamily:"JetBrains Mono",flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+                          <span style={{color:isIn?T.green:T.red}}>{isIn?"←":"→"}</span> {other?.name}
+                        </div>
+                        <span style={{fontSize:9,fontWeight:700,color:isIn?T.green:T.red,fontFamily:"JetBrains Mono",marginLeft:4}}>${f.amt}B</span>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {/* 주요 이벤트 */}
+                <div style={{marginTop:6}}>
+                  <div style={{fontSize:8,color:T.muted,fontFamily:"JetBrains Mono",fontWeight:700,marginBottom:4}}>KEY EVENTS</div>
+                  {r.keyEvents.map((ev,i)=><div key={i} style={{fontSize:8,color:T.text,fontFamily:"JetBrains Mono",padding:"3px 6px",background:r.color+"10",borderLeft:`2px solid ${r.color}66`,marginBottom:2}}>{ev}</div>)}
+                </div>
+
+                {/* 중앙은행 */}
+                <div style={{marginTop:8,padding:"8px",background:r.color+"10",borderRadius:4,border:`1px solid ${r.color}33`}}>
+                  <div style={{fontSize:8,color:T.muted,fontFamily:"JetBrains Mono"}}>중앙은행: <span style={{color:r.color,fontWeight:700}}>{r.cbName}</span></div>
+                  <div style={{fontSize:8,color:T.text,fontFamily:"JetBrains Mono",marginTop:2}}>다음 회의: <span style={{color:T.gold}}>{r.nextCB}</span></div>
+                  <div style={{fontSize:8,color:T.text,fontFamily:"JetBrains Mono",marginTop:2}}>스탠스: <span style={{color:r.stanceDir>0?T.green:r.stanceDir<0?T.red:T.gold,fontWeight:700}}>{r.stance}</span></div>
+                </div>
+              </div>
+            );
+          })():(
+            <div style={{padding:"16px 12px"}}>
+              <div style={{fontSize:9,color:T.muted,fontFamily:"JetBrains Mono",textAlign:"center",marginBottom:12,lineHeight:1.6}}>
+                지역을 클릭하면<br/>상세 정보를 볼 수 있습니다
+              </div>
+              {/* 흐름 TOP 랭킹 */}
+              <div style={{fontSize:9,color:T.muted,fontFamily:"JetBrains Mono",fontWeight:700,marginBottom:6,letterSpacing:".1em"}}>TOP FLOWS · {curMo.label}</div>
+              {[...flows].sort((a,b)=>b.amt-a.amt).slice(0,8).map((f,i)=>{
+                const fr=REGIONS.find(r=>r.id===f.from),tr=REGIONS.find(r=>r.id===f.to);
+                return(
+                  <div key={i} style={{padding:"6px 8px",background:T.panel,borderRadius:4,marginBottom:4,border:`1px solid ${f.color}33`}}>
+                    <div style={{display:"flex",justifyContent:"space-between",marginBottom:2}}>
+                      <span style={{fontSize:8,color:fr?.color,fontFamily:"JetBrains Mono",fontWeight:700}}>{fr?.name}→{tr?.name}</span>
+                      <span style={{fontSize:9,fontWeight:700,color:f.color,fontFamily:"JetBrains Mono"}}>${f.amt}B</span>
+                    </div>
+                    <div style={{height:2,background:T.dim,borderRadius:1}}><div style={{width:`${(f.amt/maxAmt)*100}%`,height:"100%",background:f.color,borderRadius:1}}/></div>
+                    <div style={{fontSize:7,color:T.dim,fontFamily:"JetBrains Mono",marginTop:2}}>{f.label}</div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+
+/* ════════════════════════════════════════════════════════════════
+   TAB 2: MACRO CHAIN — 연결고리 시각화
+════════════════════════════════════════════════════════════════ */
+function MacroChainView(){
+  const [hover,setHover]=useState(null);
+  const [selNode,setSelNode]=useState(null);
+  const [tick,setTick]=useState(0);
+  useEffect(()=>{const iv=setInterval(()=>setTick(t=>t+1),60);return()=>clearInterval(iv);},[]);
+
+  const W=760,H=440;
+
+  const connEdges=selNode?CHAIN_EDGES.filter(e=>e.from===selNode||e.to===selNode):CHAIN_EDGES;
+
+  return(
+    <div style={{display:"flex",height:"100%",gap:0}}>
+      <div style={{flex:1,position:"relative",overflow:"hidden"}}>
+        <svg width="100%" height="100%" viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="xMidYMid meet" style={{display:"block"}}>
+          <defs>
+            <radialGradient id="cBg" cx="50%" cy="50%" r="70%"><stop offset="0%" stopColor="#080e1e"/><stop offset="100%" stopColor="#04060d"/></radialGradient>
+            <filter id="cGlow"><feGaussianBlur stdDeviation="3" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+            <marker id="arr" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto">
+              <path d="M 0 0 L 6 3 L 0 6 Z" fill="#2a3a4a"/>
+            </marker>
+          </defs>
+          <rect width={W} height={H} fill="url(#cBg)"/>
+
+          {/* 엣지 */}
+          {CHAIN_EDGES.map(e=>{
+            const fn=CHAIN_NODES.find(n=>n.id===e.from),tn=CHAIN_NODES.find(n=>n.id===e.to);if(!fn||!tn)return null;
+            const x1=fn.x*W,y1=fn.y*H,x2=tn.x*W,y2=tn.y*H;
+            const mx=(x1+x2)/2+(y2-y1)*.2,my=(y1+y2)/2-(x2-x1)*.2;
+            const isH=hover===`${e.from}-${e.to}`;
+            const isSel=selNode&&(e.from===selNode||e.to===selNode);
+            const active=!selNode||isSel;
+            const sw=e.weight*(isH?2:1)*.8;
+            const col=isH?e.color:(active?e.color:T.dim);
+            const op=isH?.95:active?.35+(e.weight*.08):.08;
+            return(
+              <g key={`${e.from}-${e.to}`}
+                onMouseEnter={()=>setHover(`${e.from}-${e.to}`)}
+                onMouseLeave={()=>setHover(null)}
+                style={{cursor:"pointer"}}>
+                {isH&&<path d={`M${x1},${y1} Q${mx},${my} ${x2},${y2}`} stroke={col} strokeWidth={sw*3.5} strokeOpacity=".08" fill="none" filter="url(#cGlow)"/>}
+                <path d={`M${x1},${y1} Q${mx},${my} ${x2},${y2}`}
+                  stroke={col} strokeWidth={sw} strokeOpacity={op} fill="none"
+                  markerEnd="url(#arr)"
+                  strokeDasharray={isH?"none":"8 4"}/>
+                {(isH||isSel)&&<text x={mx} y={my} textAnchor="middle" dy="-6" fill={col} fontSize="9" fontWeight="700" fontFamily="JetBrains Mono" opacity=".9">{e.label}</text>}
+              </g>
+            );
+          })}
+
+          {/* 노드 */}
+          {CHAIN_NODES.map(n=>{
+            const px=n.x*W,py=n.y*H;
+            const pulse=Math.sin(tick*.05+n.x*7)*.08+.92;
+            const isSel=selNode===n.id;const isConn=selNode&&CHAIN_EDGES.some(e=>e.from===selNode&&e.to===n.id||e.to===selNode&&e.from===n.id);
+            const active=!selNode||isSel||isConn;
+            const sz=isSel?52:42;
+            return(
+              <g key={n.id} onClick={()=>setSelNode(p=>p===n.id?null:n.id)} style={{cursor:"pointer"}}>
+                <circle cx={px} cy={py} r={sz*.9*pulse} fill={n.color} opacity={active?.04:.015}/>
+                {isSel&&<circle cx={px} cy={py} r={sz*.75} fill="none" stroke={n.color} strokeWidth="2" strokeDasharray="5 3" opacity=".6"/>}
+                <circle cx={px} cy={py} r={sz*.5} fill={T.panel2} stroke={n.color} strokeWidth={isSel?2.5:1.5} opacity={active?1:.3}/>
+                <text x={px} y={py-4} textAnchor="middle" fill={n.color} fontSize={isSel?15:13} opacity={active?1:.3}>{n.icon}</text>
+                <text x={px} y={py+8} textAnchor="middle" fill={n.color} fontSize="9" fontWeight="700" fontFamily="JetBrains Mono" opacity={active?1:.3}>{n.label}</text>
+                <text x={px} y={py+18} textAnchor="middle" fill={T.muted} fontSize="7.5" fontFamily="JetBrains Mono" opacity={active?.8:.2}>{n.sub}</text>
+              </g>
+            );
+          })}
+        </svg>
+      </div>
+
+      {/* 사이드 */}
+      <div style={{width:240,borderLeft:`1px solid ${T.border}`,overflowY:"auto",background:T.panel2,padding:"12px 10px"}}>
+        <div style={{fontSize:9,color:T.muted,fontFamily:"JetBrains Mono",fontWeight:700,marginBottom:10,letterSpacing:".1em"}}>MACRO TRANSMISSION MAP</div>
+        <div style={{fontSize:8,color:T.muted,fontFamily:"JetBrains Mono",lineHeight:1.7,marginBottom:12}}>
+          노드를 클릭하면 연결된 전달 경로만 표시됩니다.
+        </div>
+        {(hover?(()=>{
+          const e=CHAIN_EDGES.find(x=>`${x.from}-${x.to}`===hover);if(!e)return null;
+          const fn=CHAIN_NODES.find(n=>n.id===e.from),tn=CHAIN_NODES.find(n=>n.id===e.to);
+          return(
+            <div style={{padding:"10px",background:e.color+"12",borderRadius:5,border:`1px solid ${e.color}44`,marginBottom:10}}>
+              <div style={{fontSize:10,color:e.color,fontFamily:"JetBrains Mono",fontWeight:700,marginBottom:4}}>{e.label}</div>
+              <div style={{fontSize:9,color:T.text,fontFamily:"JetBrains Mono",marginBottom:4}}>{fn?.icon} {fn?.label} → {tn?.icon} {tn?.label}</div>
+              <div style={{fontSize:8,color:T.muted,fontFamily:"JetBrains Mono",lineHeight:1.6}}>{e.desc}</div>
+              <div style={{display:"flex",gap:2,marginTop:6}}>{Array.from({length:3},(_,i)=><div key={i} style={{width:8,height:8,borderRadius:2,background:i<e.weight?e.color:T.dim}}/>)}<span style={{fontSize:7,color:T.muted,fontFamily:"JetBrains Mono",marginLeft:4}}>영향강도</span></div>
+            </div>
+          );
+        })():null)}
+
+        {selNode&&(()=>{
+          const n=CHAIN_NODES.find(x=>x.id===selNode);if(!n)return null;
+          const outEdges=CHAIN_EDGES.filter(e=>e.from===selNode);
+          const inEdges=CHAIN_EDGES.filter(e=>e.to===selNode);
+          return(
+            <div>
+              <div style={{padding:"10px",background:n.color+"12",borderRadius:5,border:`1px solid ${n.color}44`,marginBottom:8}}>
+                <div style={{fontSize:12,color:n.color,fontWeight:700,fontFamily:"Space Grotesk"}}>{n.icon} {n.label}</div>
+                <div style={{fontSize:8,color:T.muted,fontFamily:"JetBrains Mono"}}>{n.sub}</div>
+              </div>
+              {inEdges.length>0&&(<>
+                <div style={{fontSize:8,color:T.green,fontFamily:"JetBrains Mono",fontWeight:700,marginBottom:4}}>← 영향 받는 요인</div>
+                {inEdges.map(e=>{const fn=CHAIN_NODES.find(x=>x.id===e.from);return(
+                  <div key={e.from} style={{padding:"5px 8px",background:T.panel,borderRadius:3,marginBottom:3,border:`1px solid ${e.color}22`}}>
+                    <div style={{fontSize:8,color:e.color,fontFamily:"JetBrains Mono"}}>{fn?.icon} {fn?.label}</div>
+                    <div style={{fontSize:7,color:T.muted,fontFamily:"JetBrains Mono"}}>{e.label}</div>
+                  </div>
+                );})}
+              </>)}
+              {outEdges.length>0&&(<>
+                <div style={{fontSize:8,color:T.red,fontFamily:"JetBrains Mono",fontWeight:700,marginTop:8,marginBottom:4}}>→ 영향 주는 요인</div>
+                {outEdges.map(e=>{const tn=CHAIN_NODES.find(x=>x.id===e.to);return(
+                  <div key={e.to} style={{padding:"5px 8px",background:T.panel,borderRadius:3,marginBottom:3,border:`1px solid ${e.color}22`}}>
+                    <div style={{fontSize:8,color:e.color,fontFamily:"JetBrains Mono"}}>{tn?.icon} {tn?.label}</div>
+                    <div style={{fontSize:7,color:T.muted,fontFamily:"JetBrains Mono"}}>{e.label}</div>
+                  </div>
+                );})}
+              </>)}
+            </div>
+          );
+        })()}
+
+        {!selNode&&!hover&&(
+          <div>
+            <div style={{fontSize:9,color:T.muted,fontFamily:"JetBrains Mono",fontWeight:700,marginBottom:6}}>핵심 전달 경로</div>
+            {CHAIN_EDGES.filter(e=>e.weight===3).map(e=>{
+              const fn=CHAIN_NODES.find(n=>n.id===e.from),tn=CHAIN_NODES.find(n=>n.id===e.to);
+              return(
+                <div key={`${e.from}-${e.to}`} style={{padding:"6px 8px",background:T.panel,borderRadius:4,marginBottom:4,border:`1px solid ${e.color}33`}}>
+                  <div style={{fontSize:8,color:e.color,fontFamily:"JetBrains Mono",fontWeight:700}}>{fn?.icon} → {tn?.icon}</div>
+                  <div style={{fontSize:8,color:T.text,fontFamily:"JetBrains Mono"}}>{e.label}</div>
+                  <div style={{fontSize:7,color:T.muted,fontFamily:"JetBrains Mono",marginTop:2}}>{e.desc}</div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* ════════════════════════════════════════════════════════════════
+   TAB 3: TIMELINE — 스냅샷 + 타임라인
+════════════════════════════════════════════════════════════════ */
+function TimelineView(){
+  const [moIdx,setMoIdx]=useState(MONTHS.length-1);
+  const [playing,setPlaying]=useState(false);
+  const [speed,setSpeed]=useState(1.0);
+  const [viewMode,setViewMode]=useState("snapshot");
+  const playRef=useRef(null);
+
+  useEffect(()=>{if(playing){playRef.current=setInterval(()=>setMoIdx(m=>{if(m>=MONTHS.length-1){setPlaying(false);return m;}return m+1;}),Math.round(900/speed));}return()=>clearInterval(playRef.current);},[playing,speed]);
+
+  const curFlows=useMemo(()=>FLOWS.map(f=>({...f,amt:f.amounts[moIdx]})),[moIdx]);
+  const topFlows=useMemo(()=>[...curFlows].sort((a,b)=>b.amt-a.amt).slice(0,12),[curFlows]);
+  const totalIn=useMemo(()=>REGIONS.map(r=>({...r,inflow:curFlows.filter(f=>f.to===r.id).reduce((s,f)=>s+f.amt,0),outflow:curFlows.filter(f=>f.from===r.id).reduce((s,f)=>s+f.amt,0)})),[curFlows]);
+
+  const curMo=MONTHS[moIdx];
+
+  // CSV 다운로드
+  function downloadCSV(){
+    const rows=[["Month","From","To","Amount(B)","Label","Tier"]];
+    MONTHS.forEach((mo,mi)=>{
+      FLOWS.forEach(f=>{
+        rows.push([mo.label,f.from,f.to,f.amounts[mi],f.label,f.tier]);
+      });
+    });
+    const csv=rows.map(r=>r.map(v=>`"${v}"`).join(",")).join("\n");
+    const a=document.createElement("a");a.href="data:text/csv;charset=utf-8,"+encodeURIComponent(csv);a.download="global_capital_flows.csv";a.click();
+  }
+
+  function downloadJSON(){
+    const data={metadata:{generated:new Date().toISOString(),months:MONTHS.length,flows:FLOWS.length},regions:REGIONS.map(r=>({id:r.id,name:r.name,gdpGrowth:r.gdpGrowth,cpi:r.cpi,policyRate:r.policyRate,rate10y:r.rate10y})),flows:FLOWS.map(f=>({from:f.from,to:f.to,label:f.label,tier:f.tier,monthlyAmounts:MONTHS.map((m,i)=>({month:m.label,amount:f.amounts[i]}))  }))};
+    const a=document.createElement("a");a.href="data:application/json;charset=utf-8,"+encodeURIComponent(JSON.stringify(data,null,2));a.download="global_macro_flows.json";a.click();
+  }
+
+  return(
+    <div style={{display:"flex",flexDirection:"column",height:"100%"}}>
+      {/* 컨트롤 */}
+      <div style={{padding:"8px 14px",background:T.panel2,borderBottom:`1px solid ${T.border}`,display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>
+        <div style={{display:"flex",gap:4}}>
+          <button className={`btn${viewMode==="snapshot"?" a":""}`} onClick={()=>setViewMode("snapshot")}>📸 스냅샷</button>
+          <button className={`btn${viewMode==="timeline"?" a":""}`} onClick={()=>setViewMode("timeline")}>📅 타임라인</button>
+          <button className={`btn${viewMode==="heatmap"?" a":""}`} onClick={()=>setViewMode("heatmap")}>🔥 히트맵</button>
+        </div>
+        <button onClick={()=>setPlaying(p=>!p)} style={{padding:"4px 12px",borderRadius:3,border:`1px solid ${playing?T.accent:T.border}`,background:playing?T.accent+"20":"transparent",color:playing?T.accent:T.muted,fontFamily:"JetBrains Mono",fontSize:10,cursor:"pointer"}}>
+          {playing?"⏸ 정지":"▶ 재생"}
+        </button>
+        <div style={{flex:1,minWidth:200}}>
+          <div style={{display:"flex",justifyContent:"space-between",marginBottom:2}}>
+            {MONTHS.filter((_,i)=>i%3===0).map((m,i)=><span key={i} style={{fontSize:7,color:T.dim,fontFamily:"JetBrains Mono"}}>{m.label.slice(2)}</span>)}
+          </div>
+          <input type="range" min="0" max={MONTHS.length-1} value={moIdx} onChange={e=>{setMoIdx(+e.target.value);setPlaying(false);}}/>
+        </div>
+        <div style={{fontFamily:"Space Grotesk",fontSize:14,fontWeight:700,color:T.accent,minWidth:65}}>{curMo.label}</div>
+        <div style={{display:"flex",gap:4}}>
+          <button className="btn ga" onClick={downloadCSV}>⬇ CSV</button>
+          <button className="btn pa" onClick={downloadJSON}>⬇ JSON</button>
+        </div>
+      </div>
+
+      <div style={{flex:1,overflow:"auto",padding:"12px 14px"}}>
+        {viewMode==="snapshot"&&(
+          <div>
+            {/* 지역별 자금 현황 */}
+            <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8,marginBottom:12}}>
+              {totalIn.map(r=>{
+                const net=r.inflow-r.outflow;
+                return(
+                  <div key={r.id} style={{background:T.panel,border:`1px solid ${r.color}44`,borderRadius:5,padding:"10px 12px"}}>
+                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
+                      <div style={{display:"flex",alignItems:"center",gap:6}}>
+                        <span style={{fontSize:16}}>{r.flag}</span>
+                        <span style={{fontSize:11,color:r.color,fontWeight:700,fontFamily:"Space Grotesk"}}>{r.name}</span>
+                      </div>
+                      <span style={{fontSize:10,color:net>0?T.green:T.red,fontWeight:700,fontFamily:"JetBrains Mono"}}>{net>0?"+":""}${Math.round(net)}B</span>
+                    </div>
+                    <div style={{display:"flex",gap:10,marginBottom:6}}>
+                      <div style={{flex:1}}>
+                        <div style={{fontSize:7,color:T.muted,fontFamily:"JetBrains Mono",marginBottom:1}}>유입</div>
+                        <div style={{fontSize:11,color:T.green,fontWeight:700,fontFamily:"JetBrains Mono"}}>${r.inflow}B</div>
+                      </div>
+                      <div style={{flex:1}}>
+                        <div style={{fontSize:7,color:T.muted,fontFamily:"JetBrains Mono",marginBottom:1}}>유출</div>
+                        <div style={{fontSize:11,color:T.red,fontWeight:700,fontFamily:"JetBrains Mono"}}>${r.outflow}B</div>
+                      </div>
+                    </div>
+                    <div style={{height:4,background:T.dim,borderRadius:2,overflow:"hidden"}}>
+                      <div style={{width:`${Math.min((r.inflow/(r.inflow+r.outflow||1))*100,100)}%`,height:"100%",background:net>0?T.green:T.red,borderRadius:2}}/>
+                    </div>
+                    <div style={{fontSize:8,color:T.muted,fontFamily:"JetBrains Mono",marginTop:4}}>{r.gdpGrowth>0?"GDP ▲":"GDP ▼"}{r.gdpGrowth}% · CPI {r.cpi}% · PMI {r.pmi}</div>
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* TOP 플로우 */}
+            <div style={{marginBottom:12}}>
+              <div style={{fontSize:9,color:T.muted,fontFamily:"JetBrains Mono",fontWeight:700,marginBottom:6,letterSpacing:".1em"}}>TOP FLOWS · {curMo.label}</div>
+              <div style={{display:"grid",gridTemplateColumns:"repeat(2,1fr)",gap:5}}>
+                {topFlows.map((f,i)=>{
+                  const fr=REGIONS.find(r=>r.id===f.from),tr=REGIONS.find(r=>r.id===f.to);
+                  const prev=moIdx>0?f.amounts[moIdx-1]:f.amounts[0];const delta=f.amt-prev;
+                  return(
+                    <div key={i} style={{background:T.panel,borderRadius:4,padding:"8px 10px",border:`1px solid ${f.color}33`}}>
+                      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:3}}>
+                        <span style={{fontSize:9,color:fr?.color,fontFamily:"JetBrains Mono",fontWeight:700}}>{fr?.flag}{fr?.name} → {tr?.flag}{tr?.name}</span>
+                        <span style={{fontSize:9,color:delta>=0?T.green:T.red,fontFamily:"JetBrains Mono"}}>{delta>=0?"▲":"▼"}${Math.abs(delta)}B</span>
+                      </div>
+                      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                        <span style={{fontSize:13,fontWeight:700,color:f.color,fontFamily:"JetBrains Mono"}}>${f.amt}B</span>
+                        <Spark data={f.amounts} width={70} height={22}/>
+                      </div>
+                      <div style={{fontSize:7,color:T.dim,fontFamily:"JetBrains Mono",marginTop:2}}>{f.label}</div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {viewMode==="timeline"&&(
+          <div>
+            <div style={{fontSize:9,color:T.muted,fontFamily:"JetBrains Mono",fontWeight:700,marginBottom:8,letterSpacing:".1em"}}>24개월 타임라인 · 모든 자금 흐름</div>
+            {FLOWS.map(f=>{
+              const fr=REGIONS.find(r=>r.id===f.from),tr=REGIONS.find(r=>r.id===f.to);const maxV=Math.max(...f.amounts);
+              return(
+                <div key={`${f.from}-${f.to}`} style={{background:T.panel,borderRadius:4,padding:"8px 10px",marginBottom:5,border:`1px solid ${f.color}22`}}>
+                  <div style={{display:"flex",justifyContent:"space-between",marginBottom:5}}>
+                    <span style={{fontSize:9,color:fr?.color,fontFamily:"JetBrains Mono",fontWeight:700}}>{fr?.flag} {fr?.name} → {tr?.flag} {tr?.name}</span>
+                    <div style={{display:"flex",gap:6}}>
+                      <span style={{fontSize:8,color:T.muted,fontFamily:"JetBrains Mono"}}>{f.label}</span>
+                      <span style={{fontSize:9,fontWeight:700,color:f.color,fontFamily:"JetBrains Mono"}}>${f.amounts[moIdx]}B</span>
+                    </div>
+                  </div>
+                  <div style={{display:"flex",alignItems:"flex-end",gap:1,height:40}}>
+                    {f.amounts.map((v,i)=>{const bh=(v/maxV)*38;const isCur=i===moIdx;return(
+                      <div key={i} onClick={()=>setMoIdx(i)} title={`${MONTHS[i].label}: $${v}B`}
+                        style={{flex:1,display:"flex",flexDirection:"column",justifyContent:"flex-end",cursor:"pointer",height:40}}>
+                        <div style={{width:"100%",height:bh,background:isCur?f.color:f.color+"44",borderRadius:"2px 2px 0 0",transition:"height .2s",boxShadow:isCur?`0 0 6px ${f.color}88`:""}}/>
+                      </div>
+                    );})}
+                  </div>
+                  <div style={{display:"flex",justifyContent:"space-between",marginTop:2}}>
+                    {MONTHS.filter((_,i)=>i%6===0).map((m,i)=><span key={i} style={{fontSize:7,color:T.dim,fontFamily:"JetBrains Mono"}}>{m.label.slice(2)}</span>)}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        {viewMode==="heatmap"&&(
+          <div>
+            <div style={{fontSize:9,color:T.muted,fontFamily:"JetBrains Mono",fontWeight:700,marginBottom:8}}>지역간 자금 흐름 매트릭스 (현재: {curMo.label})</div>
+            <div style={{overflowX:"auto"}}>
+              <table style={{borderCollapse:"collapse",fontFamily:"JetBrains Mono",fontSize:9,minWidth:600}}>
+                <thead>
+                  <tr>
+                    <th style={{padding:"6px 10px",color:T.muted,textAlign:"left",borderBottom:`1px solid ${T.border}`,fontSize:8}}>FROM↓ TO→</th>
+                    {REGIONS.map(r=><th key={r.id} style={{padding:"6px 8px",color:r.color,fontSize:8,borderBottom:`1px solid ${T.border}`,fontWeight:700,minWidth:62}}>{r.flag}{r.name}</th>)}
+                    <th style={{padding:"6px 8px",color:T.gold,fontSize:8,borderBottom:`1px solid ${T.border}`,fontWeight:700}}>총유출</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {REGIONS.map(fr=>{
+                    const rowFlows=REGIONS.map(tr=>{if(fr.id===tr.id)return null;return curFlows.find(f=>f.from===fr.id&&f.to===tr.id)||null;});
+                    const rowTotal=rowFlows.reduce((s,f)=>s+(f?.amt||0),0);
+                    return(
+                      <tr key={fr.id}>
+                        <td style={{padding:"6px 10px",color:fr.color,fontWeight:700,borderBottom:`1px solid ${T.border}22`,whiteSpace:"nowrap"}}>{fr.flag} {fr.name}</td>
+                        {REGIONS.map((tr,i)=>{
+                          const f=rowFlows[i];
+                          if(fr.id===tr.id)return<td key={tr.id} style={{padding:"6px 8px",background:T.dim+"44",borderBottom:`1px solid ${T.border}22`}}>—</td>;
+                          if(!f)return<td key={tr.id} style={{padding:"6px 8px",color:T.dim,textAlign:"right",borderBottom:`1px solid ${T.border}22`}}>·</td>;
+                          const intensity=f.amt/300;const bg=`rgba(0,212,255,${Math.min(intensity*.4,.4)})`;
+                          return(
+                            <td key={tr.id} style={{padding:"6px 8px",background:bg,color:T.accent,fontWeight:700,textAlign:"right",borderBottom:`1px solid ${T.border}22`,borderLeft:`1px solid ${T.border}11`}}>
+                              ${f.amt}
+                            </td>
+                          );
+                        })}
+                        <td style={{padding:"6px 8px",color:T.red,fontWeight:700,textAlign:"right",borderBottom:`1px solid ${T.border}22`,borderLeft:`1px solid ${T.border}`}}>${rowTotal}B</td>
+                      </tr>
+                    );
+                  })}
+                  <tr>
+                    <td style={{padding:"6px 10px",color:T.gold,fontWeight:700,fontSize:8}}>총유입</td>
+                    {REGIONS.map(tr=>{const total=curFlows.filter(f=>f.to===tr.id).reduce((s,f)=>s+f.amt,0);return<td key={tr.id} style={{padding:"6px 8px",color:T.green,fontWeight:700,textAlign:"right",borderTop:`1px solid ${T.border}`}}>{total?`$${total}B`:""}</td>;})}
+                    <td/>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+
+/* ════════════════════════════════════════════════════════════════
+   TAB 4: HEDGE FUNDS
+════════════════════════════════════════════════════════════════ */
+function HedgeFundView(){
+  const [sel,setSel]=useState(null);
+  const fund=sel?HEDGE_FUNDS.find(f=>f.name===sel):null;
+
+  return(
+    <div style={{display:"flex",height:"100%"}}>
+      {/* 펀드 목록 */}
+      <div style={{width:220,borderRight:`1px solid ${T.border}`,overflowY:"auto",background:T.panel2}}>
+        <div style={{padding:"10px 12px",borderBottom:`1px solid ${T.border}`}}>
+          <div style={{fontSize:9,color:T.muted,fontFamily:"JetBrains Mono",fontWeight:700,letterSpacing:".1em"}}>세계 주요 헤지펀드</div>
+          <div style={{fontSize:7,color:T.dim,fontFamily:"JetBrains Mono",marginTop:2}}>총 운용자산 $463B+ 추적</div>
+        </div>
+        {HEDGE_FUNDS.map(f=>(
+          <div key={f.name} onClick={()=>setSel(p=>p===f.name?null:f.name)}
+            style={{padding:"12px 12px",cursor:"pointer",borderBottom:`1px solid ${T.border}`,
+              background:sel===f.name?f.color+"12":T.bg,
+              borderLeft:sel===f.name?`3px solid ${f.color}`:"3px solid transparent"}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:3}}>
+              <span style={{fontSize:11,color:sel===f.name?f.color:T.text,fontWeight:700,fontFamily:"Space Grotesk"}}>{f.name}</span>
+              <span style={{fontSize:8,color:f.color,fontFamily:"JetBrains Mono",fontWeight:700}}>{f.aum}</span>
+            </div>
+            <div style={{fontSize:7.5,color:T.muted,fontFamily:"JetBrains Mono",marginBottom:4}}>{f.style}</div>
+            <div style={{fontSize:7,color:f.color,background:f.color+"15",padding:"2px 6px",borderRadius:2,display:"inline-block"}}>{f.regime}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* 상세 */}
+      <div style={{flex:1,overflowY:"auto",padding:"14px 16px"}}>
+        {fund?(
+          <div>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:16}}>
+              <div>
+                <div style={{fontSize:20,color:fund.color,fontWeight:700,fontFamily:"Space Grotesk",marginBottom:3}}>{fund.name}</div>
+                <div style={{fontSize:9,color:T.muted,fontFamily:"JetBrains Mono"}}>창업자: {fund.founder} · AUM: {fund.aum}</div>
+                <div style={{fontSize:9,color:T.muted,fontFamily:"JetBrains Mono",marginTop:2}}>전략: {fund.style}</div>
+              </div>
+              <div style={{padding:"8px 14px",background:fund.color+"12",borderRadius:5,border:`1px solid ${fund.color}44`,textAlign:"center"}}>
+                <div style={{fontSize:9,color:T.muted,fontFamily:"JetBrains Mono",marginBottom:3}}>현재 레짐</div>
+                <div style={{fontSize:10,color:fund.color,fontFamily:"JetBrains Mono",fontWeight:700}}>{fund.regime}</div>
+              </div>
+            </div>
+
+            <div style={{fontSize:9,color:T.muted,fontFamily:"JetBrains Mono",fontWeight:700,marginBottom:8,letterSpacing:".1em"}}>포지션 현황 (추정)</div>
+            <div style={{display:"flex",flexDirection:"column",gap:6,marginBottom:16}}>
+              {fund.positions.map((pos,i)=>{
+                const stanceColor=pos.stance==="LONG"||pos.stance==="OVERWEIGHT"||pos.stance==="NET LONG"?T.green:pos.stance==="SHORT"||pos.stance==="UNDERWEIGHT"?T.red:T.gold;
+                return(
+                  <div key={i} style={{background:T.panel,borderRadius:5,padding:"12px 14px",border:`1px solid ${stanceColor}22`}}>
+                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
+                      <span style={{fontSize:11,color:T.text,fontWeight:700,fontFamily:"Space Grotesk"}}>{pos.asset}</span>
+                      <span style={{fontSize:9,color:stanceColor,fontWeight:700,fontFamily:"JetBrains Mono",padding:"2px 10px",background:stanceColor+"20",borderRadius:3,border:`1px solid ${stanceColor}55`}}>
+                        {pos.stance}
+                      </span>
+                    </div>
+                    <div style={{marginBottom:6}}>
+                      <div style={{display:"flex",justifyContent:"space-between",marginBottom:2}}>
+                        <span style={{fontSize:7,color:T.muted,fontFamily:"JetBrains Mono"}}>포지션 비중</span>
+                        <span style={{fontSize:8,color:stanceColor,fontFamily:"JetBrains Mono",fontWeight:700}}>{pos.size}%</span>
+                      </div>
+                      <div style={{height:5,background:T.dim,borderRadius:2,overflow:"hidden"}}>
+                        <div style={{width:`${pos.size}%`,height:"100%",background:`linear-gradient(90deg,${stanceColor}99,${stanceColor})`,borderRadius:2}}/>
+                      </div>
+                    </div>
+                    <div style={{fontSize:8,color:T.muted,fontFamily:"JetBrains Mono"}}>{pos.note}</div>
+                  </div>
+                );
+              })}
+            </div>
+
+            <div style={{background:T.panel2,borderRadius:5,padding:"12px 14px",border:`1px solid ${T.border}`}}>
+              <div style={{fontSize:9,color:T.muted,fontFamily:"JetBrains Mono",fontWeight:700,marginBottom:6}}>⚠️ 면책 조항</div>
+              <div style={{fontSize:8,color:T.dim,fontFamily:"JetBrains Mono",lineHeight:1.7}}>
+                헤지펀드 포지션 정보는 SEC 13F, 공개 인터뷰, 언론 보도를 기반으로 한 추정치입니다.
+                실제 포지션과 다를 수 있으며 투자 조언이 아닙니다.
+              </div>
+            </div>
+          </div>
+        ):(
+          <div>
+            <div style={{fontSize:11,color:T.muted,fontFamily:"JetBrains Mono",marginBottom:16}}>왼쪽에서 헤지펀드를 선택하세요</div>
+            {/* 전체 비교 */}
+            <div style={{display:"grid",gridTemplateColumns:"repeat(2,1fr)",gap:8}}>
+              {HEDGE_FUNDS.map(f=>(
+                <div key={f.name} onClick={()=>setSel(f.name)} style={{background:T.panel,border:`1px solid ${f.color}44`,borderRadius:5,padding:"12px 14px",cursor:"pointer"}}>
+                  <div style={{display:"flex",justifyContent:"space-between",marginBottom:6}}>
+                    <span style={{fontSize:13,color:f.color,fontWeight:700,fontFamily:"Space Grotesk"}}>{f.name}</span>
+                    <span style={{fontSize:10,color:T.gold,fontFamily:"JetBrains Mono",fontWeight:700}}>{f.aum}</span>
+                  </div>
+                  <div style={{fontSize:8,color:T.muted,fontFamily:"JetBrains Mono",marginBottom:6}}>{f.style}</div>
+                  <div style={{display:"flex",flexWrap:"wrap",gap:3}}>
+                    {f.positions.slice(0,3).map((p,i)=>{
+                      const sc=p.stance==="LONG"||p.stance==="OVERWEIGHT"||p.stance==="NET LONG"?T.green:p.stance==="SHORT"||p.stance==="UNDERWEIGHT"?T.red:T.gold;
+                      return<span key={i} style={{fontSize:7,color:sc,background:sc+"15",padding:"1px 5px",borderRadius:2,fontFamily:"JetBrains Mono"}}>{p.asset}</span>;
+                    })}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* ════════════════════════════════════════════════════════════════
+   TAB 5: MARKETS — 라이브 시장 데이터
+════════════════════════════════════════════════════════════════ */
+function MarketsView(){
+  const [tab,setTab]=useState("indices");
+  const [cryptoData,setCryptoData]=useState([
+    {n:"BTC",p:85420,c:2.3},{n:"ETH",p:2180,c:1.8},{n:"BNB",p:412,c:.8},{n:"XRP",p:2.18,c:-1.2},{n:"SOL",p:142.5,c:3.1},{n:"ADA",p:.48,c:-.5},
+  ]);
+  const [fxData,setFxData]=useState({USD:1,KRW:1368.5,JPY:149.2,EUR:.918,CNY:7.24,GBP:.782,AUD:1.562,CAD:1.382,MXN:17.85,BRL:4.97});
+  const [fxLive,setFxLive]=useState(false);
+
+  useEffect(()=>{
+    fetch("https://api.exchangerate-api.com/v4/latest/USD").then(r=>r.json()).then(d=>{setFxData({USD:1,KRW:d.rates.KRW,JPY:d.rates.JPY,EUR:d.rates.EUR,CNY:d.rates.CNY,GBP:d.rates.GBP,AUD:d.rates.AUD,CAD:d.rates.CAD,MXN:d.rates.MXN,BRL:d.rates.BRL});setFxLive(true);}).catch(()=>{});
+    fetch("https://api.coingecko.com/api/v3/simple/price?ids=bitcoin,ethereum,binancecoin,ripple,solana,cardano&vs_currencies=usd&include_24hr_change=true").then(r=>r.json()).then(d=>{setCryptoData([{n:"BTC",p:d.bitcoin?.usd,c:d.bitcoin?.usd_24h_change},{n:"ETH",p:d.ethereum?.usd,c:d.ethereum?.usd_24h_change},{n:"BNB",p:d["binancecoin"]?.usd,c:d["binancecoin"]?.usd_24h_change},{n:"XRP",p:d.ripple?.usd,c:d.ripple?.usd_24h_change},{n:"SOL",p:d.solana?.usd,c:d.solana?.usd_24h_change},{n:"ADA",p:d.cardano?.usd,c:d.cardano?.usd_24h_change}]);}).catch(()=>{});
+  },[]);
+
+  const fxPairs=[{p:"USD/KRW",v:fxData.KRW,f:"🇺🇸🇰🇷",d:1},{p:"USD/JPY",v:fxData.JPY,f:"🇺🇸🇯🇵",d:2},{p:"EUR/USD",v:1/fxData.EUR,f:"🇪🇺🇺🇸",d:4},{p:"USD/CNY",v:fxData.CNY,f:"🇺🇸🇨🇳",d:4},{p:"GBP/USD",v:1/fxData.GBP,f:"🇬🇧🇺🇸",d:4},{p:"USD/MXN",v:fxData.MXN,f:"🇺🇸🇲🇽",d:4},{p:"AUD/USD",v:1/fxData.AUD,f:"🇦🇺🇺🇸",d:4},{p:"USD/BRL",v:fxData.BRL,f:"🇺🇸🇧🇷",d:4}];
+
+  return(
+    <div style={{display:"flex",flexDirection:"column",height:"100%"}}>
+      <div style={{padding:"6px 14px",background:T.panel2,borderBottom:`1px solid ${T.border}`,display:"flex",gap:4}}>
+        {[["indices","주요지수"],["fx","환율"],["crypto","크립토"],["commodities","원자재"],["rates","금리"],["calendar","캘린더"]].map(([id,lbl])=>(
+          <button key={id} className={`btn${tab===id?" a":""}`} onClick={()=>setTab(id)}>{lbl}</button>
+        ))}
+        <div style={{marginLeft:"auto",display:"flex",alignItems:"center",gap:6}}>
+          <span style={{fontSize:8,color:fxLive?T.green:T.muted,fontFamily:"JetBrains Mono"}}>● {fxLive?"LIVE · ExchangeRate-API":"연결 중..."}</span>
+        </div>
+      </div>
+      <div style={{flex:1,overflow:"hidden"}}>
+        {tab==="indices"&&<TV type="market-overview" height="100%" opts={{dateRange:"1D",showChart:true,showFloatingTooltip:true,showSymbolLogo:true,tabs:[{title:"전체",symbols:[{s:"FOREXCOM:SPXUSD",d:"S&P500"},{s:"FOREXCOM:NSXUSD",d:"NASDAQ"},{s:"KRX:KOSPI",d:"KOSPI"},{s:"KRX:KOSDAQ",d:"KOSDAQ"},{s:"INDEX:NKY",d:"NIKKEI"},{s:"INDEX:DEU40",d:"DAX"},{s:"INDEX:HSI",d:"항셍"},{s:"SSE:000001",d:"상하이"},{s:"BMFBOVESPA:IBOV",d:"BOVESPA"},{s:"INDEX:TASI",d:"TADAWUL"},{s:"ASX:XJO",d:"ASX200"},{s:"INDEX:SENSEX",d:"SENSEX"},{s:"TWSE:Y9999",d:"TAIEX"}]},{title:"한국",symbols:[{s:"KRX:KOSPI",d:"KOSPI"},{s:"KRX:KOSDAQ",d:"KOSDAQ"},{s:"KRX:005930",d:"삼성전자"},{s:"KRX:000660",d:"SK하이닉스"},{s:"KRX:035420",d:"NAVER"},{s:"KRX:086520",d:"에코프로"},{s:"KRX:373220",d:"LG에너지솔루션"},{s:"KRX:000270",d:"기아"}]}]}}/>}
+        {tab==="fx"&&(
+          <div style={{padding:"12px 14px",display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+            {fxPairs.map(x=>(
+              <div key={x.p} style={{display:"flex",alignItems:"center",gap:10,padding:"8px 12px",background:T.panel,borderRadius:4,border:`1px solid ${T.border}`}}>
+                <span style={{fontSize:16}}>{x.f}</span>
+                <span style={{color:T.accent,fontFamily:"JetBrains Mono",fontSize:11,fontWeight:700,minWidth:82}}>{x.p}</span>
+                <span style={{color:T.text,fontFamily:"JetBrains Mono",fontSize:13,fontWeight:700,flex:1}}>{parseFloat(x.v).toFixed(x.d)}</span>
+              </div>
+            ))}
+          </div>
+        )}
+        {tab==="crypto"&&(
+          <div style={{padding:"12px 14px"}}>
+            <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:6,marginBottom:12}}>
+              {cryptoData.map(x=>(
+                <div key={x.n} style={{background:T.panel,borderRadius:4,padding:"10px 12px",border:`1px solid ${T.border}`}}>
+                  <div style={{fontSize:11,color:T.gold,fontWeight:700,fontFamily:"JetBrains Mono",marginBottom:4}}>{x.n}</div>
+                  <div style={{fontSize:14,color:T.text,fontWeight:700,fontFamily:"JetBrains Mono"}}>${x.p?.toLocaleString("en-US",{maximumFractionDigits:2})}</div>
+                  <div style={{fontSize:10,color:(x.c||0)>=0?T.green:T.red,fontFamily:"JetBrains Mono"}}>{(x.c||0)>=0?"▲":"▼"}{Math.abs(x.c||0).toFixed(2)}%</div>
+                </div>
+              ))}
+            </div>
+            <TV type="screener" height={280} opts={{defaultScreen:"crypto",market:"crypto",showToolbar:false}}/>
+          </div>
+        )}
+        {tab==="commodities"&&(
+          <div style={{padding:"12px 14px"}}>
+            <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:6,marginBottom:12}}>
+              {[{s:"금",p:3018,c:0.82,col:"#ffd700"},{s:"은",p:33.2,c:1.1,col:"#c0c0c0"},{s:"WTI",p:68.5,c:-0.6,col:"#ff7043"},{s:"Brent",p:72.2,c:-0.4,col:"#ff9800"},{s:"NatGas",p:3.82,c:2.1,col:"#4caf50"},{s:"구리",p:4.52,c:0.35,col:"#b87333"},{s:"니켈",p:16420,c:-1.2,col:"#888"},{s:"리튬",p:12.4,c:-2.1,col:"#64b5f6"},{s:"희토류",p:null,c:null,col:"#ce93d8"}].map(x=>(
+                <div key={x.s} style={{background:T.panel,borderRadius:4,padding:"10px 12px",border:`1px solid ${x.col}33`}}>
+                  <div style={{fontSize:10,color:x.col,fontWeight:700,fontFamily:"JetBrains Mono",marginBottom:3}}>{x.s}</div>
+                  <div style={{fontSize:13,color:T.text,fontWeight:700,fontFamily:"JetBrains Mono"}}>{x.p?`$${x.p.toLocaleString()}`:"시세 없음"}</div>
+                  {x.c!=null&&<div style={{fontSize:9,color:x.c>=0?T.green:T.red,fontFamily:"JetBrains Mono"}}>{x.c>=0?"▲":"▼"}{Math.abs(x.c)}%</div>}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+        {tab==="rates"&&(
+          <div style={{padding:"12px 14px"}}>
+            <div style={{display:"grid",gridTemplateColumns:"repeat(2,1fr)",gap:8}}>
+              {REGIONS.map(r=>(
+                <div key={r.id} style={{background:T.panel,borderRadius:5,padding:"10px 12px",border:`1px solid ${r.color}33`}}>
+                  <div style={{display:"flex",justifyContent:"space-between",marginBottom:8}}>
+                    <div style={{display:"flex",alignItems:"center",gap:6}}><span style={{fontSize:14}}>{r.flag}</span><span style={{fontSize:11,color:r.color,fontWeight:700,fontFamily:"Space Grotesk"}}>{r.name}</span></div>
+                    <div style={{textAlign:"right"}}>
+                      <div style={{fontSize:9,color:T.muted,fontFamily:"JetBrains Mono"}}>기준금리</div>
+                      <div style={{fontSize:13,color:r.color,fontWeight:700,fontFamily:"JetBrains Mono"}}>{r.policyRate}%</div>
+                    </div>
+                  </div>
+                  {r.yields&&(()=>{
+                    const mn=Math.min(...r.yields)-.1,mx=Math.max(...r.yields)+.1,rng=mx-mn;const W=180,H=50;
+                    const pts=r.yields.map((v,i)=>`${(i/(r.yields.length-1))*W},${H-((v-mn)/rng)*(H-8)-4}`).join(" ");
+                    const inv=r.yields[5]<r.yields[2];
+                    return(
+                      <div>
+                        <svg width={W} height={H} style={{display:"block",marginBottom:4}}>
+                          <polyline points={pts} fill="none" stroke={inv?T.red:r.color} strokeWidth="1.5" strokeLinejoin="round"/>
+                          {r.yields.map((v,i)=>{const x=(i/(r.yields.length-1))*W,y=H-((v-mn)/rng)*(H-8)-4;return<circle key={i} cx={x} cy={y} r="2.5" fill={inv?T.red:r.color}/>;  })}
+                        </svg>
+                        <div style={{display:"flex",justifyContent:"space-between",marginBottom:3}}>
+                          {["1M","3M","6M","1Y","2Y","5Y","10Y","30Y"].map(t=><span key={t} style={{fontSize:6.5,color:T.dim,fontFamily:"JetBrains Mono"}}>{t}</span>)}
+                        </div>
+                        <div style={{fontSize:8,color:inv?T.red:T.green,fontFamily:"JetBrains Mono",fontWeight:700}}>{inv?"⚠️ 역전":"✅ 정상"} · 10Y: {r.rate10y}%</div>
+                      </div>
+                    );
+                  })()}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+        {tab==="calendar"&&<TV type="events" height="100%" opts={{importanceFilter:"0,1",countryFilter:"us,eu,jp,kr,cn,gb,br,au"}}/>}
+      </div>
+    </div>
+  );
+}
+
+
+/* ════════════════════════════════════════════════════════════════
+   TAB 6: API GUIDE
+════════════════════════════════════════════════════════════════ */
+function ApiGuideView(){
+  const apis=[
+    {name:"TradingView Widgets",tier:"무료",cost:"$0",coverage:"주가·환율·지수·뉴스",limit:"무제한 임베드",
+     bestFor:"시각화·차트·위젯",color:T.green,url:"https://www.tradingview.com/widget/",
+     note:"현재 이 대시보드가 사용 중. 차트·티커·히트맵 등 UI 컴포넌트 제공."},
+    {name:"ExchangeRate-API",tier:"무료",cost:"$0 / 1,500req/월",coverage:"환율 (160개 통화)",limit:"1,500 req/mo",
+     bestFor:"실시간 환율",color:T.green,url:"https://www.exchangerate-api.com/",
+     note:"현재 이 대시보드가 사용 중. 무료 플랜으로 실시간 환율 제공."},
+    {name:"CoinGecko API",tier:"무료",cost:"$0 / 기본",coverage:"암호화폐 전체",limit:"30 req/min",
+     bestFor:"크립토 실시간",color:T.green,url:"https://www.coingecko.com/api/",
+     note:"현재 이 대시보드가 사용 중. 무료로 BTC·ETH 등 실시간 데이터 제공."},
+    {name:"Alpha Vantage",tier:"무료→유료",cost:"$0~$50/mo",coverage:"주식·FX·원자재·거시지표",limit:"25 req/day(무료)",
+     bestFor:"거시경제 지표",color:T.gold,url:"https://www.alphavantage.co/",
+     note:"GDP·CPI·실업률 등 거시지표 API. 무료 플랜은 일 25회 제한."},
+    {name:"Finnhub",tier:"무료→유료",cost:"$0~$99/mo",coverage:"주식·뉴스·헤지펀드 13F·거시",limit:"60 req/min(무료)",
+     bestFor:"헤지펀드 13F·뉴스",color:T.gold,url:"https://finnhub.io/",
+     note:"SEC 13F 헤지펀드 포지션 데이터 제공. 이 대시보드 헤지펀드 탭 강화에 최적."},
+    {name:"FRED API (St. Louis Fed)",tier:"무료",cost:"$0 완전 무료",coverage:"미국 거시경제 82만+ 시리즈",limit:"무제한",
+     bestFor:"미국 거시지표 완전판",color:T.green,url:"https://fred.stlouisfed.org/docs/api/",
+     note:"Fed 공식 데이터. GDP·CPI·실업·연방기금금리·수익률곡선 전부 무료."},
+    {name:"World Bank API",tier:"무료",cost:"$0 완전 무료",coverage:"글로벌 국가 거시지표",limit:"무제한",
+     bestFor:"국가별 경제 건강도",color:T.green,url:"https://data.worldbank.org/",
+     note:"190개국 GDP·무역·인구·부채 데이터. 국가 건강 스코어 실제 데이터화에 적합."},
+    {name:"Polygon.io",tier:"유료",cost:"$29~$199/mo",coverage:"주식·옵션·선물·FX 실시간",limit:"티어별",
+     bestFor:"주식 실시간·옵션 플로우",color:T.orange,url:"https://polygon.io/",
+     note:"기관급 실시간 데이터. 옵션 플로우 분석으로 헤지펀드 방향성 파악에 유용."},
+    {name:"EODHD",tier:"유료",cost:"$19.99~$79.99/mo",coverage:"주식·펀더멘털·매크로·인사이더",limit:"티어별",
+     bestFor:"글로벌 펀더멘털+거시",color:T.orange,url:"https://eodhd.com/",
+     note:"150개국 주식·펀더멘털·뉴스·인사이더 트레이딩. 가성비 좋은 종합 API."},
+    {name:"Investing.com",tier:"없음",cost:"공개 API 없음",coverage:"웹 서비스만",limit:"API 미제공",
+     bestFor:"웹사이트 직접 참고",color:T.red,url:"https://www.investing.com/",
+     note:"2025년 기준 공개 API 미제공. 계약상 데이터 제공자 제약. 위젯(iframe)만 제공 가능."},
+    {name:"Bloomberg Terminal",tier:"기관용",cost:"$24,000~$28,000/년",coverage:"모든 자산·경제·뉴스",limit:"무제한",
+     bestFor:"기관 트레이더",color:"#ff6b35",url:"https://www.bloomberg.com/professional/",
+     note:"글로벌 스탠다드. 개인용으로는 비용 과대. 이 대시보드가 블룸버그 대안 목표."},
+    {name:"Refinitiv (LSEG)",tier:"기관용",cost:"$22,000~$/년",coverage:"뉴스·채권·파생상품",limit:"무제한",
+     bestFor:"기관 채권·파생",color:"#ff6b35",url:"https://www.refinitiv.com/",
+     note:"블룸버그 경쟁사. 로이터 뉴스 포함. 개인보다 기관 대상."},
+  ];
+
+  const [selApi,setSelApi]=useState(null);
+
+  return(
+    <div style={{display:"flex",height:"100%"}}>
+      <div style={{flex:1,overflowY:"auto",padding:"14px 16px"}}>
+        <div style={{marginBottom:14}}>
+          <div style={{fontSize:13,color:T.accent,fontFamily:"Space Grotesk",fontWeight:700,marginBottom:4}}>📡 금융 데이터 API 가이드</div>
+          <div style={{fontSize:9,color:T.muted,fontFamily:"JetBrains Mono",lineHeight:1.7}}>
+            Investing.com은 <span style={{color:T.red,fontWeight:700}}>공개 API를 제공하지 않습니다</span> (2025년 기준, 데이터 계약상 제약).
+            아래는 이 대시보드를 <span style={{color:T.green,fontWeight:700}}>실제 라이브 데이터</span>로 강화하기 위한 최적 API 조합입니다.
+          </div>
+        </div>
+
+        <div style={{display:"grid",gridTemplateColumns:"repeat(2,1fr)",gap:6}}>
+          {apis.map(api=>{
+            const isSel=selApi===api.name;
+            return(
+              <div key={api.name} onClick={()=>setSelApi(p=>p===api.name?null:api.name)}
+                style={{background:T.panel,border:`1px solid ${api.color}${isSel?"88":"33"}`,borderRadius:5,padding:"10px 12px",cursor:"pointer",
+                  boxShadow:isSel?`0 0 12px ${api.color}22`:"none"}}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:5}}>
+                  <span style={{fontSize:11,color:api.color,fontWeight:700,fontFamily:"Space Grotesk"}}>{api.name}</span>
+                  <span style={{fontSize:9,color:api.color,background:api.color+"20",padding:"2px 8px",borderRadius:2,fontFamily:"JetBrains Mono",fontWeight:700,whiteSpace:"nowrap",border:`1px solid ${api.color}44`}}>
+                    {api.tier}
+                  </span>
+                </div>
+                <div style={{fontSize:11,color:T.gold,fontFamily:"JetBrains Mono",fontWeight:700,marginBottom:3}}>{api.cost}</div>
+                <div style={{fontSize:8,color:T.muted,fontFamily:"JetBrains Mono",marginBottom:3}}>{api.coverage}</div>
+                {isSel&&(
+                  <div style={{marginTop:8,paddingTop:8,borderTop:`1px solid ${T.border}`}}>
+                    <div style={{fontSize:8,color:T.text,fontFamily:"JetBrains Mono",lineHeight:1.7,marginBottom:6}}>{api.note}</div>
+                    <div style={{fontSize:8,color:T.muted,fontFamily:"JetBrains Mono"}}>한계: {api.limit}</div>
+                    <a href={api.url} target="_blank" style={{fontSize:8,color:api.color,fontFamily:"JetBrains Mono",display:"block",marginTop:4,textDecoration:"none"}}>🔗 {api.url}</a>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+
+        <div style={{marginTop:14,background:T.panel2,borderRadius:6,padding:"14px 16px",border:`1px solid ${T.border}`}}>
+          <div style={{fontSize:10,color:T.gold,fontFamily:"Space Grotesk",fontWeight:700,marginBottom:8}}>💡 권장 조합 (개인 투자자용)</div>
+          {[
+            {combo:"FRED API + World Bank",cost:"완전 무료",use:"국가별 경제 건강 스코어 → 실제 데이터화"},
+            {combo:"Finnhub 무료",cost:"$0",use:"헤지펀드 SEC 13F 포지션 → 실제 포지션 데이터"},
+            {combo:"Alpha Vantage 기본",cost:"$0~$50/mo",use:"거시지표(CPI·실업) 자동 업데이트"},
+            {combo:"CoinGecko + ExchangeRate-API",cost:"$0 (현재 사용 중)",use:"크립토·환율 실시간 (이미 연동됨)"},
+            {combo:"TradingView Widgets",cost:"$0 (현재 사용 중)",use:"차트·지수·뉴스 (이미 연동됨)"},
+          ].map((r,i)=>(
+            <div key={i} style={{display:"flex",alignItems:"center",gap:10,padding:"6px 8px",background:T.panel,borderRadius:3,marginBottom:4}}>
+              <span style={{fontSize:9,color:T.accent,fontFamily:"JetBrains Mono",fontWeight:700,minWidth:220}}>{r.combo}</span>
+              <span style={{fontSize:9,color:T.green,fontFamily:"JetBrains Mono",fontWeight:700,minWidth:80}}>{r.cost}</span>
+              <span style={{fontSize:8,color:T.muted,fontFamily:"JetBrains Mono"}}>{r.use}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ════════════════════════════════════════════════════════════════
+   MAIN APP
+════════════════════════════════════════════════════════════════ */
+function App(){
+  const [tab,setTab]=useState("worldmap");
+  const [clock,setClock]=useState(new Date());
+  useEffect(()=>{const iv=setInterval(()=>setClock(new Date()),1000);return()=>clearInterval(iv);},[]);
+  const kst=new Date(clock.toLocaleString("en-US",{timeZone:"Asia/Seoul"}));
+  const nyc=new Date(clock.toLocaleString("en-US",{timeZone:"America/New_York"}));
+  const lon=new Date(clock.toLocaleString("en-US",{timeZone:"Europe/London"}));
+  const nyO=nyc.getHours()>=9&&nyc.getHours()<16;
+  const lonO=lon.getHours()>=8&&lon.getHours()<16;
+  const kstO=kst.getHours()>=9&&kst.getHours()<15;
+
+  const TABS=[
+    {id:"worldmap", label:"🌍 글로벌 자금 지도",  sub:"9개 지역·자금흐름"},
+    {id:"chain",    label:"🔗 매크로 연결고리",   sub:"중앙은행→시장 전달"},
+    {id:"timeline", label:"📅 타임라인·스냅샷",   sub:"24M 시계열·CSV"},
+    {id:"hedgefund",label:"🦁 헤지펀드 추적",     sub:"8대 펀드 포지션"},
+    {id:"markets",  label:"📊 글로벌 시장",       sub:"지수·FX·크립토·금리"},
+    {id:"apiguide", label:"📡 데이터 API 가이드", sub:"비용·가이드"},
+  ];
+
+  return(
+    <div style={{background:T.bg,height:"100vh",display:"flex",flexDirection:"column",fontFamily:"JetBrains Mono,monospace"}}>
+
+      {/* ── 헤더 ── */}
+      <div style={{height:44,background:"#02040a",borderBottom:`1px solid ${T.border}`,display:"flex",alignItems:"center",justifyContent:"space-between",padding:"0 16px",flexShrink:0}}>
+        <div style={{display:"flex",alignItems:"center",gap:12}}>
+          <div style={{width:3,height:28,background:`linear-gradient(180deg,${T.accent},${T.purple})`,borderRadius:2}}/>
+          <div>
+            <span style={{fontFamily:"Space Grotesk",fontSize:17,fontWeight:700,color:T.accent,letterSpacing:".04em"}}>GLOBAL MACRO INTELLIGENCE</span>
+            <span style={{fontSize:8.5,color:T.muted,fontFamily:"JetBrains Mono",marginLeft:10}}>v1.0 · 9 Regions · 8 Hedge Funds · Bloomberg-Style</span>
+          </div>
+        </div>
+        <div style={{display:"flex",gap:16,fontSize:10,alignItems:"center"}}>
+          <span className="mono">KST <span style={{color:kstO?T.green:T.accent,fontWeight:700}}>{kst.toLocaleTimeString("ko-KR",{hour12:false})}</span>{kstO&&<span style={{color:T.green,fontSize:7,marginLeft:3}}>OPEN</span>}</span>
+          <span className="mono">LON <span style={{color:lonO?T.green:T.gold,fontWeight:700}}>{lon.toLocaleTimeString("en-GB",{hour12:false})}</span></span>
+          <span className="mono">NYC <span style={{color:nyO?T.green:T.gold,fontWeight:700}}>{nyc.toLocaleTimeString("en-US",{hour12:false})}</span></span>
+          <span style={{color:nyO?T.green:T.red,fontSize:8,padding:"2px 9px",border:`1px solid ${(nyO?T.green:T.red)}55`,borderRadius:2,fontWeight:700,fontFamily:"JetBrains Mono"}}>● NYSE {nyO?"OPEN":"CLOSED"}</span>
+        </div>
+      </div>
+
+      {/* ── 티커 ── */}
+      <div style={{height:40,flexShrink:0,borderBottom:`1px solid ${T.border}`}}>
+        <TV type="ticker-tape" height={40} opts={{symbols:[
+          {proName:"FOREXCOM:SPXUSD",title:"S&P500"},{proName:"INDEX:NKY",title:"NIKKEI"},{proName:"KRX:KOSPI",title:"KOSPI"},
+          {proName:"INDEX:DEU40",title:"DAX"},{proName:"INDEX:HSI",title:"항셍"},{proName:"SSE:000001",title:"상하이"},
+          {proName:"BITSTAMP:BTCUSD",title:"BTC"},{proName:"BITSTAMP:ETHUSD",title:"ETH"},
+          {proName:"FOREXCOM:USDKRW",title:"USD/KRW"},{proName:"FOREXCOM:USDJPY",title:"USD/JPY"},
+          {proName:"COMEX:GC1!",title:"금"},{proName:"NYMEX:CL1!",title:"WTI"},
+          {proName:"COMEX:HG1!",title:"구리"},{proName:"INDEX:TASI",title:"TADAWUL"},
+          {proName:"BMFBOVESPA:IBOV",title:"BOVESPA"},{proName:"ASX:XJO",title:"ASX200"},
+        ],showSymbolLogo:false,displayMode:"adaptive"}}/>
+      </div>
+
+      {/* ── 탭 네비 ── */}
+      <div style={{height:46,background:"#060c18",borderBottom:`1px solid ${T.border}`,display:"flex",alignItems:"stretch",padding:"0 10px",flexShrink:0}}>
+        {TABS.map(t=>(
+          <button key={t.id} onClick={()=>setTab(t.id)}
+            style={{padding:"0 14px",border:"none",background:"transparent",cursor:"pointer",
+              borderBottom:tab===t.id?`2px solid ${T.accent}`:"2px solid transparent",
+              color:tab===t.id?T.accent:T.muted,fontFamily:"JetBrains Mono",fontSize:10,
+              fontWeight:tab===t.id?700:400,display:"flex",flexDirection:"column",
+              alignItems:"center",justifyContent:"center",gap:1,transition:"color .2s",flexShrink:0}}>
+            <span style={{fontSize:tab===t.id?10.5:10}}>{t.label}</span>
+            <span style={{fontSize:7,opacity:.7,color:tab===t.id?T.accent:T.dim}}>{t.sub}</span>
+          </button>
+        ))}
+      </div>
+
+      {/* ── 메인 컨텐츠 ── */}
+      <div style={{flex:1,overflow:"hidden",display:"flex",flexDirection:"column"}}>
+        {tab==="worldmap"&&<WorldMapView/>}
+        {tab==="chain"&&<MacroChainView/>}
+        {tab==="timeline"&&<TimelineView/>}
+        {tab==="hedgefund"&&<HedgeFundView/>}
+        {tab==="markets"&&<MarketsView/>}
+        {tab==="apiguide"&&<ApiGuideView/>}
+      </div>
+
+      {/* ── 푸터 ── */}
+      <div style={{height:22,background:"#02040a",borderTop:`1px solid ${T.border}`,display:"flex",alignItems:"center",justifyContent:"space-between",padding:"0 14px",flexShrink:0}}>
+        <span style={{fontSize:7.5,color:T.dim,fontFamily:"JetBrains Mono"}}>TradingView · CoinGecko · ExchangeRate-API (실시간) · 자금흐름·헤지펀드: 모델/추정 데이터 · 투자 참고용</span>
+        <span style={{fontSize:7.5,color:T.muted,fontFamily:"JetBrains Mono"}}>GLOBAL MACRO INTELLIGENCE v1.0 · Made for 최윤준 · {new Date().getFullYear()}</span>
+      </div>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
+</script>
+</body>
+</html>
