@@ -32,7 +32,7 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:12px;heigh
 </style>
 </head>
 <body><div id="root"></div>
-<script type="text/babel">
+<script type="text/babel" data-presets="env,react">
 const {useState,useEffect,useRef,useMemo,useCallback}=React;
 
 /* ════════════════════════════════════════════════════════════════
@@ -57,57 +57,53 @@ const LiveCtx=React.createContext(null);
 function useLive(){return React.useContext(LiveCtx)||{};}
 
 // FRED: fetch series observations, return most recent non-null value
-async function fredVal(series){
-  try{
-    const r=await fetch(`https://api.stlouisfed.org/fred/series/observations?series_id=${series}&api_key=${FRED_KEY}&limit=5&sort_order=desc&file_type=json`);
-    const d=await r.json();
-    const obs=d.observations?.filter(o=>o.value!=='.'&&o.value!='');
-    return obs?.length?parseFloat(obs[0].value):null;
-  }catch{return null;}
+function fredVal(series){
+  return fetch("https://api.stlouisfed.org/fred/series/observations?series_id="+series+"&api_key="+FRED_KEY+"&limit=5&sort_order=desc&file_type=json")
+    .then(function(r){return r.json();})
+    .then(function(d){
+      var obs=(d.observations||[]).filter(function(o){return o.value!=="."&&o.value!=="";});
+      return obs.length?parseFloat(obs[0].value):null;
+    })
+    .catch(function(){return null;});
 }
 
-// FRED CPI YoY: compare latest month to 12 months prior
-async function fredCpiYoy(){
-  try{
-    const r=await fetch(`https://api.stlouisfed.org/fred/series/observations?series_id=CPIAUCSL&api_key=${FRED_KEY}&limit=15&sort_order=desc&file_type=json`);
-    const d=await r.json();
-    const obs=d.observations?.filter(o=>o.value!=='.')||[];
-    if(obs.length<13)return null;
-    return +((parseFloat(obs[0].value)/parseFloat(obs[12].value)-1)*100).toFixed(2);
-  }catch{return null;}
+function fredCpiYoy(){
+  return fetch("https://api.stlouisfed.org/fred/series/observations?series_id=CPIAUCSL&api_key="+FRED_KEY+"&limit=15&sort_order=desc&file_type=json")
+    .then(function(r){return r.json();})
+    .then(function(d){
+      var obs=(d.observations||[]).filter(function(o){return o.value!=="."&&o.value!=="";});
+      if(obs.length<13)return null;
+      return +((parseFloat(obs[0].value)/parseFloat(obs[12].value)-1)*100).toFixed(2);
+    })
+    .catch(function(){return null;});
 }
 
-// Alpha Vantage: commodity (WTI/BRENT/NATURAL_GAS/COPPER)
-async function avComm(func){
-  try{
-    const r=await fetch(`https://www.alphavantage.co/query?function=${func}&interval=monthly&apikey=${AV_KEY}`);
-    const d=await r.json();
-    // Check for rate limit message
-    if(d['Note']||d['Information'])return null;
-    const latest=d.data?.[0];
-    return latest?+parseFloat(latest.value).toFixed(3):null;
-  }catch{return null;}
+function avComm(func){
+  return fetch("https://www.alphavantage.co/query?function="+func+"&interval=monthly&apikey="+AV_KEY)
+    .then(function(r){return r.json();})
+    .then(function(d){
+      if(d["Note"]||d["Information"])return null;
+      var latest=d.data&&d.data[0];
+      return latest?+parseFloat(latest.value).toFixed(3):null;
+    })
+    .catch(function(){return null;});
 }
 
-// Finnhub: market news
-async function fhNews(){
-  try{
-    const r=await fetch(`https://finnhub.io/api/v1/news?category=general&token=${FH_KEY}`);
-    const d=await r.json();
-    return Array.isArray(d)?d.filter(n=>n.headline&&n.url).slice(0,20):[];
-  }catch{return[];}
+function fhNews(){
+  return fetch("https://finnhub.io/api/v1/news?category=general&token="+FH_KEY)
+    .then(function(r){return r.json();})
+    .then(function(d){return Array.isArray(d)?d.filter(function(n){return n.headline&&n.url;}).slice(0,20):[];})
+    .catch(function(){return[];});
 }
 
-// Finnhub: economic calendar (past 7 days + next 14 days)
-async function fhEconCal(){
-  try{
-    const from=new Date();from.setDate(from.getDate()-7);
-    const to=new Date();to.setDate(to.getDate()+14);
-    const fmt=d=>d.toISOString().slice(0,10);
-    const r=await fetch(`https://finnhub.io/api/v1/calendar/economic?from=${fmt(from)}&to=${fmt(to)}&token=${FH_KEY}`);
-    const d=await r.json();
-    return d.economicCalendar?.filter(e=>['High','Medium'].includes(e.impact)).slice(0,25)||[];
-  }catch{return[];}
+function fhEconCal(){
+  var from=new Date();from.setDate(from.getDate()-7);
+  var to=new Date();to.setDate(to.getDate()+14);
+  var fmt=function(d){return d.toISOString().slice(0,10);};
+  return fetch("https://finnhub.io/api/v1/calendar/economic?from="+fmt(from)+"&to="+fmt(to)+"&token="+FH_KEY)
+    .then(function(r){return r.json();})
+    .then(function(d){return (d.economicCalendar||[]).filter(function(e){return e.impact==="High"||e.impact==="Medium";}).slice(0,25);})
+    .catch(function(){return[];});
 }
 
 /* ════════════════════════════════════════════════════════════════
@@ -2002,46 +1998,36 @@ function App(){
 
   // Fetch all live data on mount
   useEffect(()=>{
-    (async()=>{
-      const updates={loading:false,lastUpdated:new Date()};
+    var updates={loading:false,lastUpdated:new Date()};
+    // FRED: fetch all series in parallel
+    Promise.all([
+      fredVal("DFF"),fredVal("UNRATE"),fredCpiYoy(),fredVal("A191RL1Q225SBEA"),
+      fredVal("DGS2"),fredVal("DGS5"),fredVal("DGS10"),fredVal("DGS30"),
+      fredVal("DGS1MO"),fredVal("DGS3MO"),fredVal("DGS6MO"),fredVal("DGS1"),
+    ]).then(function(vals){
+      var fedRate=vals[0],unemployment=vals[1],cpi=vals[2],gdpGrowth=vals[3],
+          rate2y=vals[4],rate5y=vals[5],rate10y=vals[6],rate30y=vals[7],
+          rate1m=vals[8],rate3m=vals[9],rate6m=vals[10],rate1y=vals[11];
+      var fredData={fedRate:fedRate,unemployment:unemployment,cpi:cpi,gdpGrowth:gdpGrowth,
+        rate2y:rate2y,rate5y:rate5y,rate10y:rate10y,rate30y:rate30y};
+      fredData.yields=[rate1m,rate3m,rate6m,rate1y,rate2y,rate5y,rate10y,rate30y].map(function(v){return v||0;});
+      updates.fred=fredData;
+      updates.fredLive=!![fedRate,unemployment,cpi,rate10y].filter(function(v){return v!=null;}).length;
+      setLive(function(prev){return Object.assign({},prev,updates);});
+    }).catch(function(e){console.warn("FRED error",e);setLive(function(prev){return Object.assign({},prev,{loading:false});});});
 
-      // ── FRED ────────────────────────────────────────────────
-      try{
-        const [fedRate,unemployment,cpi,gdpGrowth,rate2y,rate5y,rate10y,rate30y,rate1m,rate3m,rate6m,rate1y]=
-          await Promise.all([
-            fredVal("DFF"),fredVal("UNRATE"),fredCpiYoy(),fredVal("A191RL1Q225SBEA"),
-            fredVal("DGS2"),fredVal("DGS5"),fredVal("DGS10"),fredVal("DGS30"),
-            fredVal("DGS1MO"),fredVal("DGS3MO"),fredVal("DGS6MO"),fredVal("DGS1"),
-          ]);
-        const fredData={fedRate,unemployment,cpi,gdpGrowth,rate2y,rate5y,rate10y,rate30y};
-        // Build US yield curve array: 1M,3M,6M,1Y,2Y,5Y,10Y,30Y
-        const yields=[rate1m,rate3m,rate6m,rate1y,rate2y,rate5y,rate10y,rate30y].map(v=>v||0);
-        fredData.yields=yields;
-        updates.fred=fredData;
-        updates.fredLive=Object.values(fredData).some(v=>v!=null);
-      }catch(e){console.warn("FRED error",e);}
+    // Alpha Vantage
+    Promise.all([avComm("WTI"),avComm("NATURAL_GAS"),avComm("COPPER"),avComm("BRENT")])
+      .then(function(vals){
+        var av={wti:vals[0],natgas:vals[1],copper:vals[2],brent:vals[3]};
+        setLive(function(prev){return Object.assign({},prev,{av:av,avLive:!![vals[0],vals[1],vals[2]].filter(function(v){return v!=null;}).length});});
+      }).catch(function(e){console.warn("AV error",e);});
 
-      // ── Alpha Vantage ────────────────────────────────────────
-      try{
-        const [wti,natgas,copper]=await Promise.all([
-          avComm("WTI"),avComm("NATURAL_GAS"),avComm("COPPER"),
-        ]);
-        // Brent separate (might fail, non-blocking)
-        let brent=null;
-        try{brent=await avComm("BRENT");}catch{}
-        updates.av={wti,brent,natgas,copper};
-        updates.avLive=[wti,natgas,copper].some(v=>v!=null);
-      }catch(e){console.warn("AV error",e);}
-
-      // ── Finnhub ──────────────────────────────────────────────
-      try{
-        const [news,econ]=await Promise.all([fhNews(),fhEconCal()]);
-        updates.fh={news,econ};
-        updates.fhLive=news.length>0||econ.length>0;
-      }catch(e){console.warn("Finnhub error",e);}
-
-      setLive(prev=>({...prev,...updates}));
-    })();
+    // Finnhub
+    Promise.all([fhNews(),fhEconCal()])
+      .then(function(vals){
+        setLive(function(prev){return Object.assign({},prev,{fh:{news:vals[0],econ:vals[1]},fhLive:vals[0].length>0||vals[1].length>0});});
+      }).catch(function(e){console.warn("FH error",e);});
   },[]);
 
   const kst=new Date(clock.toLocaleString("en-US",{timeZone:"Asia/Seoul"}));
