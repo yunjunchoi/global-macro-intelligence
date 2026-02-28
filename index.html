@@ -32,7 +32,7 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:12px;heigh
 </style>
 </head>
 <body><div id="root"></div>
-<script type="text/babel" data-presets="env,react">
+<script type="text/babel" data-presets="react">
 const {useState,useEffect,useRef,useMemo,useCallback}=React;
 
 /* ════════════════════════════════════════════════════════════════
@@ -551,7 +551,7 @@ function WorldMapView(){
   // FLOW LINES VIEW — 대형 라인 + 레이블
   function FlowLinesView(){
     const sorted=[...flows].sort((a,b)=>b.amt-a.amt);
-    const max=sorted[0]?.amt||1;
+    const max=(sorted[0]&&sorted[0].amt)||1;
     const W=900,H=480;
     const tierColor={xl:"#00d4ff",lg:"#f0b429",md:"#00e676",sm:"#bb86fc"};
 
@@ -592,7 +592,7 @@ function WorldMapView(){
                 {isH&&<line x1={cx-barW} y1={y+lw/2} x2={cx} y2={y+lw/2} stroke={col} strokeWidth={lw*2.5} strokeOpacity=".08" filter="url(#flGlow)" strokeLinecap="round"/>}
                 {/* 메인 라인 */}
                 <line x1={cx-barW} y1={y+lw/2} x2={cx} y2={y+lw/2}
-                  stroke={col} strokeWidth={lw} strokeOpacity={isH?.95:.55+(f.amt/max)*.35} strokeLinecap="round"/>
+                  stroke={col} strokeWidth={lw} strokeOpacity={isH?0.95:0.55+(f.amt/max)*0.35} strokeLinecap="round"/>
                 {/* 화살표 끝 */}
                 <polygon points={`${cx+2},${y+lw/2} ${cx-12},${y} ${cx-12},${y+lw}`} fill={col} opacity={isH?1:.7}/>
                 {/* 출발 레이블 */}
@@ -671,11 +671,11 @@ function WorldMapView(){
               <div style={{display:"flex",flexWrap:"wrap",gap:4,marginTop:4}}>
                 {flows.filter(f=>f.to===r.id).slice(0,3).map((f,i)=>{
                   const fr2=REGIONS.find(x=>x.id===f.from);
-                  return<span key={i} style={{fontSize:7,color:T.green,background:T.green+"12",padding:"1px 6px",borderRadius:2,fontFamily:"JetBrains Mono"}}>← {fr2?.name} ${f.amt}B</span>;
+                  return<span key={i} style={{fontSize:7,color:T.green,background:T.green+"12",padding:"1px 6px",borderRadius:2,fontFamily:"JetBrains Mono"}}>← {fr2&&fr2.name} ${f.amt}B</span>;
                 })}
                 {flows.filter(f=>f.from===r.id).slice(0,3).map((f,i)=>{
                   const tr2=REGIONS.find(x=>x.id===f.to);
-                  return<span key={i} style={{fontSize:7,color:T.red,background:T.red+"12",padding:"1px 6px",borderRadius:2,fontFamily:"JetBrains Mono"}}>→ {tr2?.name} ${f.amt}B</span>;
+                  return<span key={i} style={{fontSize:7,color:T.red,background:T.red+"12",padding:"1px 6px",borderRadius:2,fontFamily:"JetBrains Mono"}}>→ {tr2&&tr2.name} ${f.amt}B</span>;
                 })}
               </div>
             </div>
@@ -739,11 +739,11 @@ function WorldMapView(){
               return(
                 <div key={i} style={{padding:"8px 9px",background:T.panel,borderRadius:4,marginBottom:5,border:`1px solid ${f.color}33`}}>
                   <div style={{display:"flex",justifyContent:"space-between",marginBottom:2}}>
-                    <span style={{fontSize:8.5,color:f.color,fontWeight:700,fontFamily:"JetBrains Mono"}}>{fr?.name}→{tr?.name}</span>
+                    <span style={{fontSize:8.5,color:f.color,fontWeight:700,fontFamily:"JetBrains Mono"}}>{(fr&&fr.name)}→{(tr&&tr.name)}</span>
                     <span style={{fontSize:9,color:delta>=0?T.green:T.red,fontFamily:"JetBrains Mono",fontWeight:700}}>{delta>=0?"▲":"▼"}{Math.abs(chg)}%</span>
                   </div>
                   <div style={{fontSize:13,color:T.text,fontWeight:700,fontFamily:"JetBrains Mono",marginBottom:2}}>${f.amt}B</div>
-                  <div style={{height:2,background:T.dim,borderRadius:1}}><div style={{width:`${(f.amt/flows[0]?.amt||1)*100}%`,height:"100%",background:f.color}}/></div>
+                  <div style={{height:2,background:T.dim,borderRadius:1}}><div style={{width:`${(f.amt/(flows[0]&&flows[0].amt||1))*100}%`,height:"100%",background:f.color}}/></div>
                   <div style={{fontSize:7,color:T.dim,fontFamily:"JetBrains Mono",marginTop:3}}>{f.label}</div>
                 </div>
               );
@@ -791,10 +791,10 @@ function WorldMapView(){
                     onClick={()=>{}}
                     style={{cursor:"pointer"}}>
                     {/* 글로우 레이어 */}
-                    {(active)&&<path d={dPath} stroke={f.color} strokeWidth={w*3.5} strokeOpacity={isH?.18:.05+(normW*.06)} fill="none" filter="url(#glowXL)"/>}
+                    {(active)&&<path d={dPath} stroke={f.color} strokeWidth={w*3.5} strokeOpacity={isH?018:.05+(normW*.06)} fill="none" filter="url(#glowXL)"/>}
                     {/* 메인 라인 */}
                     <path d={dPath} stroke={f.color} strokeWidth={active?w:w*.3}
-                      strokeOpacity={isH?.98:active?.45+(normW*.45):.06} fill="none"
+                      strokeOpacity={isH?0.98:active?0.45+(normW*0.45):0.06} fill="none"
                       strokeLinecap="round"/>
                     {/* 티어 XL/LG는 항상 금액 레이블 표시 */}
                     {(f.tier==="xl"||(f.tier==="lg"&&active)||isH)&&(
@@ -891,7 +891,7 @@ function WorldMapView(){
                       return(
                         <div key={i} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"4px 6px",background:T.panel,borderRadius:3,marginBottom:2,border:`1px solid ${isIn?T.green:T.red}22`}}>
                           <div style={{fontSize:8,color:T.text,fontFamily:"JetBrains Mono",flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
-                            <span style={{color:isIn?T.green:T.red}}>{isIn?"←":"→"}</span> {other?.name}
+                            <span style={{color:isIn?T.green:T.red}}>{isIn?"←":"→"}</span> {othe(r&&r.name)}
                           </div>
                           <span style={{fontSize:9,fontWeight:700,color:isIn?T.green:T.red,fontFamily:"JetBrains Mono",marginLeft:4}}>${f.amt}B</span>
                         </div>
@@ -920,7 +920,7 @@ function WorldMapView(){
                   return(
                     <div key={i} style={{padding:"6px 8px",background:T.panel,borderRadius:4,marginBottom:4,border:`1px solid ${f.color}33`}}>
                       <div style={{display:"flex",justifyContent:"space-between",marginBottom:2}}>
-                        <span style={{fontSize:8,color:fr?.color,fontFamily:"JetBrains Mono",fontWeight:700}}>{fr?.name}→{tr?.name}</span>
+                        <span style={{fontSize:8,color:(fr&&fr.color),fontFamily:"JetBrains Mono",fontWeight:700}}>{(fr&&fr.name)}→{(tr&&tr.name)}</span>
                         <span style={{fontSize:9,fontWeight:700,color:f.color,fontFamily:"JetBrains Mono"}}>${f.amt}B</span>
                       </div>
                       <div style={{height:3,background:T.dim,borderRadius:1}}><div style={{width:`${(f.amt/maxAmt)*100}%`,height:"100%",background:f.color,borderRadius:1}}/></div>
@@ -1249,7 +1249,7 @@ function MacroChainView(){
               }
               const sw=e.weight*(isH?2:1)*.9;
               const col=isH?edgeCol:(active?edgeCol:T.dim);
-              const op=isH?.95:active?.4+(e.weight*.08):.07;
+              const op=isH?095:active?04+(e.weight*.08):.07;
               const markerEnd=isH&&chainMode==="country"?(edgeCol===T.red+"cc"?"url(#arrR)":"url(#arrG)"):"url(#arr)";
               return(
                 <g key={`${e.from}-${e.to}`}
@@ -1279,7 +1279,7 @@ function MacroChainView(){
 
               return(
                 <g key={n.id} onClick={()=>setSelNode(p=>p===n.id?null:n.id)} style={{cursor:"pointer"}}>
-                  <circle cx={px} cy={py} r={sz*.9*pulse} fill={nc} opacity={active?.05:.015}/>
+                  <circle cx={px} cy={py} r={sz*.9*pulse} fill={nc} opacity={active?005:.015}/>
                   {isSel&&<circle cx={px} cy={py} r={sz*.78} fill="none" stroke={nc} strokeWidth="2" strokeDasharray="5 3" opacity=".7"/>}
                   <circle cx={px} cy={py} r={sz*.5} fill={nc} opacity=".08" filter="url(#cGlow)"/>
                   <circle cx={px} cy={py} r={sz*.44} fill={T.panel2} stroke={nc} strokeWidth={isSel?2.8:1.8} opacity={active?1:.3}/>
@@ -1293,7 +1293,7 @@ function MacroChainView(){
                     </g>
                   )}
                   {/* 글로벌 모드: 서브레이블 */}
-                  {chainMode==="global"&&<text x={px} y={py+18} textAnchor="middle" fill={T.muted} fontSize="7.5" fontFamily="JetBrains Mono" opacity={active?.8:.2}>{n.sub}</text>}
+                  {chainMode==="global"&&<text x={px} y={py+18} textAnchor="middle" fill={T.muted} fontSize="7.5" fontFamily="JetBrains Mono" opacity={active?08:.2}>{n.sub}</text>}
                 </g>
               );
             })}
@@ -1322,7 +1322,7 @@ function MacroChainView(){
           <div style={{borderBottom:`1px solid ${T.border}`,background:"#060c18"}}>
             <div style={{padding:"8px 10px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
               <span style={{fontSize:9,color:T.muted,fontFamily:"JetBrains Mono",fontWeight:700}}>
-                📰 {region?.name} 주요 뉴스
+                📰 {(region&&region.name)} 주요 뉴스
               </span>
               <span style={{fontSize:7,color:T.dim,fontFamily:"JetBrains Mono"}}>Google News 링크</span>
             </div>
@@ -1333,7 +1333,7 @@ function MacroChainView(){
                   transition:"background .15s"}}
                 onMouseEnter={e=>e.currentTarget.style.background=T.dim+"66"}
                 onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
-                <span style={{fontSize:16,flexShrink:0}}>{region?.flag}</span>
+                <span style={{fontSize:16,flexShrink:0}}>{(region&&region.flag)}</span>
                 <div style={{flex:1,overflow:"hidden"}}>
                   <div style={{fontSize:8.5,color:T.accent,fontFamily:"JetBrains Mono",fontWeight:700,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{n.title}</div>
                   <div style={{fontSize:7,color:T.muted,fontFamily:"JetBrains Mono",marginTop:1}}>🔗 {n.src}</div>
@@ -1370,20 +1370,20 @@ function MacroChainView(){
                   <div style={{fontSize:8.5,color:T.muted,fontFamily:"JetBrains Mono",lineHeight:1.7}}>{cd.detail}</div>
                 </div>
                 {inEdges.length>0&&(<>
-                  <div style={{fontSize:8,color:T.green,fontFamily:"JetBrains Mono",fontWeight:700,marginBottom:4}}>← {region?.name}에서 영향 받는 요인</div>
+                  <div style={{fontSize:8,color:T.green,fontFamily:"JetBrains Mono",fontWeight:700,marginBottom:4}}>← {(region&&region.name)}에서 영향 받는 요인</div>
                   {inEdges.map(e=>{const fn=CHAIN_NODES.find(x=>x.id===e.from);const fc=chainData[e.from];return(
                     <div key={e.from} style={{padding:"6px 8px",background:T.panel,borderRadius:3,marginBottom:3,border:`1px solid ${nodeStatusColor(e.from)}22`}}>
-                      <div style={{fontSize:9,color:nodeStatusColor(e.from),fontFamily:"JetBrains Mono",fontWeight:700}}>{fn?.icon} {fn?.label}</div>
+                      <div style={{fontSize:9,color:nodeStatusColor(e.from),fontFamily:"JetBrains Mono",fontWeight:700}}>{(fn&&fn.icon)} {(fn&&fn.label)}</div>
                       <div style={{fontSize:8,color:T.text,fontFamily:"JetBrains Mono"}}>{e.label}</div>
                       {fc&&<div style={{fontSize:7,color:T.muted,fontFamily:"JetBrains Mono",marginTop:1}}>{fc.value}</div>}
                     </div>
                   );})}
                 </>)}
                 {outEdges.length>0&&(<>
-                  <div style={{fontSize:8,color:T.red,fontFamily:"JetBrains Mono",fontWeight:700,marginTop:8,marginBottom:4}}>→ {region?.name}에 영향 주는 요인</div>
+                  <div style={{fontSize:8,color:T.red,fontFamily:"JetBrains Mono",fontWeight:700,marginTop:8,marginBottom:4}}>→ {(region&&region.name)}에 영향 주는 요인</div>
                   {outEdges.map(e=>{const tn=CHAIN_NODES.find(x=>x.id===e.to);const tc=chainData[e.to];return(
                     <div key={e.to} style={{padding:"6px 8px",background:T.panel,borderRadius:3,marginBottom:3,border:`1px solid ${nodeStatusColor(e.to)}22`}}>
-                      <div style={{fontSize:9,color:nodeStatusColor(e.to),fontFamily:"JetBrains Mono",fontWeight:700}}>{tn?.icon} {tn?.label}</div>
+                      <div style={{fontSize:9,color:nodeStatusColor(e.to),fontFamily:"JetBrains Mono",fontWeight:700}}>{(tn&&tn.icon)} {(tn&&tn.label)}</div>
                       <div style={{fontSize:8,color:T.text,fontFamily:"JetBrains Mono"}}>{e.label}</div>
                       {tc&&<div style={{fontSize:7,color:T.muted,fontFamily:"JetBrains Mono",marginTop:1}}>{tc.value}</div>}
                     </div>
@@ -1403,11 +1403,11 @@ function MacroChainView(){
                 </div>
                 {inEdges.length>0&&(<>
                   <div style={{fontSize:8,color:T.green,fontFamily:"JetBrains Mono",fontWeight:700,marginBottom:4}}>← 영향 받는 요인</div>
-                  {inEdges.map(e=>{const fn=CHAIN_NODES.find(x=>x.id===e.from);return(<div key={e.from} style={{padding:"5px 8px",background:T.panel,borderRadius:3,marginBottom:3,border:`1px solid ${e.color}22`}}><div style={{fontSize:9,color:e.color,fontFamily:"JetBrains Mono"}}>{fn?.icon} {fn?.label}</div><div style={{fontSize:8,color:T.muted,fontFamily:"JetBrains Mono"}}>{e.label}</div><div style={{fontSize:7,color:T.dim,fontFamily:"JetBrains Mono"}}>{e.desc}</div></div>);})}
+                  {inEdges.map(e=>{const fn=CHAIN_NODES.find(x=>x.id===e.from);return(<div key={e.from} style={{padding:"5px 8px",background:T.panel,borderRadius:3,marginBottom:3,border:`1px solid ${e.color}22`}}><div style={{fontSize:9,color:e.color,fontFamily:"JetBrains Mono"}}>{(fn&&fn.icon)} {(fn&&fn.label)}</div><div style={{fontSize:8,color:T.muted,fontFamily:"JetBrains Mono"}}>{e.label}</div><div style={{fontSize:7,color:T.dim,fontFamily:"JetBrains Mono"}}>{e.desc}</div></div>);})}
                 </>)}
                 {outEdges.length>0&&(<>
                   <div style={{fontSize:8,color:T.red,fontFamily:"JetBrains Mono",fontWeight:700,marginTop:8,marginBottom:4}}>→ 영향 주는 요인</div>
-                  {outEdges.map(e=>{const tn=CHAIN_NODES.find(x=>x.id===e.to);return(<div key={e.to} style={{padding:"5px 8px",background:T.panel,borderRadius:3,marginBottom:3,border:`1px solid ${e.color}22`}}><div style={{fontSize:9,color:e.color,fontFamily:"JetBrains Mono"}}>{tn?.icon} {tn?.label}</div><div style={{fontSize:8,color:T.text,fontFamily:"JetBrains Mono"}}>{e.label}</div><div style={{fontSize:7,color:T.dim,fontFamily:"JetBrains Mono"}}>{e.desc}</div></div>);})}
+                  {outEdges.map(e=>{const tn=CHAIN_NODES.find(x=>x.id===e.to);return(<div key={e.to} style={{padding:"5px 8px",background:T.panel,borderRadius:3,marginBottom:3,border:`1px solid ${e.color}22`}}><div style={{fontSize:9,color:e.color,fontFamily:"JetBrains Mono"}}>{(tn&&tn.icon)} {(tn&&tn.label)}</div><div style={{fontSize:8,color:T.text,fontFamily:"JetBrains Mono"}}>{e.label}</div><div style={{fontSize:7,color:T.dim,fontFamily:"JetBrains Mono"}}>{e.desc}</div></div>);})}
                 </>)}
               </div>
             );
@@ -1455,7 +1455,7 @@ function MacroChainView(){
                   {CHAIN_EDGES.filter(e=>e.weight===3).map(e=>{
                     const fn=CHAIN_NODES.find(n=>n.id===e.from),tn=CHAIN_NODES.find(n=>n.id===e.to);
                     return(<div key={`${e.from}-${e.to}`} style={{padding:"6px 8px",background:T.panel,borderRadius:4,marginBottom:4,border:`1px solid ${e.color}33`}}>
-                      <div style={{fontSize:8.5,color:e.color,fontFamily:"JetBrains Mono",fontWeight:700}}>{fn?.icon} → {tn?.icon}</div>
+                      <div style={{fontSize:8.5,color:e.color,fontFamily:"JetBrains Mono",fontWeight:700}}>{(fn&&fn.icon)} → {(tn&&tn.icon)}</div>
                       <div style={{fontSize:8,color:T.text,fontFamily:"JetBrains Mono"}}>{e.label}</div>
                       <div style={{fontSize:7,color:T.muted,fontFamily:"JetBrains Mono",marginTop:2}}>{e.desc}</div>
                     </div>);
@@ -1469,6 +1469,192 @@ function MacroChainView(){
     </div>
   );
 }
+
+/* ════════════════════════════════════════════════════════════════
+   TAB 3: TIMELINE — 스냅샷 + 타임라인
+════════════════════════════════════════════════════════════════ */
+function TimelineView(){
+  const [moIdx,setMoIdx]=useState(MONTHS.length-1);
+  const [playing,setPlaying]=useState(false);
+  const [speed,setSpeed]=useState(1.0);
+  const [viewMode,setViewMode]=useState("snapshot");
+  const playRef=useRef(null);
+
+  useEffect(()=>{if(playing){playRef.current=setInterval(()=>setMoIdx(m=>{if(m>=MONTHS.length-1){setPlaying(false);return m;}return m+1;}),Math.round(900/speed));}return()=>clearInterval(playRef.current);},[playing,speed]);
+
+  const curFlows=useMemo(()=>FLOWS.map(f=>({...f,amt:f.amounts[moIdx]})),[moIdx]);
+  const topFlows=useMemo(()=>[...curFlows].sort((a,b)=>b.amt-a.amt).slice(0,12),[curFlows]);
+  const totalIn=useMemo(()=>REGIONS.map(r=>({...r,inflow:curFlows.filter(f=>f.to===r.id).reduce((s,f)=>s+f.amt,0),outflow:curFlows.filter(f=>f.from===r.id).reduce((s,f)=>s+f.amt,0)})),[curFlows]);
+  const curMo=MONTHS[moIdx];
+
+  function downloadCSV(){
+    const rows=[["Month","From","To","Amount(B)","Label","Tier"]];
+    MONTHS.forEach((mo,mi)=>{FLOWS.forEach(f=>{rows.push([mo.label,f.from,f.to,f.amounts[mi],f.label,f.tier]);});});
+    const csv=rows.map(r=>r.map(v=>`"${v}"`).join(",")).join("\n");
+    const a=document.createElement("a");a.href="data:text/csv;charset=utf-8,"+encodeURIComponent(csv);a.download="global_capital_flows.csv";a.click();
+  }
+
+  function downloadJSON(){
+    const data={metadata:{generated:new Date().toISOString(),months:MONTHS.length,flows:FLOWS.length},
+      regions:REGIONS.map(r=>({id:r.id,name:r.name,gdpGrowth:r.gdpGrowth,cpi:r.cpi,policyRate:r.policyRate,rate10y:r.rate10y})),
+      flows:FLOWS.map(f=>({from:f.from,to:f.to,label:f.label,tier:f.tier,monthlyAmounts:MONTHS.map((m,i)=>({month:m.label,amount:f.amounts[i]}))}))};
+    const a=document.createElement("a");a.href="data:application/json;charset=utf-8,"+encodeURIComponent(JSON.stringify(data,null,2));a.download="global_macro_flows.json";a.click();
+  }
+
+  return(
+    <div style={{display:"flex",flexDirection:"column",height:"100%"}}>
+      <div style={{padding:"8px 14px",background:T.panel2,borderBottom:`1px solid ${T.border}`,display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>
+        <div style={{display:"flex",gap:4}}>
+          <button className={`btn${viewMode==="snapshot"?" a":""}`} onClick={()=>setViewMode("snapshot")}>📸 스냅샷</button>
+          <button className={`btn${viewMode==="timeline"?" a":""}`} onClick={()=>setViewMode("timeline")}>📅 타임라인</button>
+          <button className={`btn${viewMode==="heatmap"?" a":""}`} onClick={()=>setViewMode("heatmap")}>🔥 히트맵</button>
+        </div>
+        <button onClick={()=>setPlaying(p=>!p)} style={{padding:"4px 12px",borderRadius:3,border:`1px solid ${playing?T.accent:T.border}`,background:playing?T.accent+"20":"transparent",color:playing?T.accent:T.muted,fontFamily:"JetBrains Mono",fontSize:10,cursor:"pointer"}}>
+          {playing?"⏸ 정지":"▶ 재생"}
+        </button>
+        <div style={{flex:1,minWidth:200}}>
+          <div style={{display:"flex",justifyContent:"space-between",marginBottom:2}}>
+            {MONTHS.filter((_,i)=>i%3===0).map((m,i)=><span key={i} style={{fontSize:7,color:T.dim,fontFamily:"JetBrains Mono"}}>{m.label.slice(2)}</span>)}
+          </div>
+          <input type="range" min="0" max={MONTHS.length-1} value={moIdx} onChange={e=>{setMoIdx(+e.target.value);setPlaying(false);}}/>
+        </div>
+        <div style={{fontFamily:"Space Grotesk",fontSize:14,fontWeight:700,color:T.accent,minWidth:65}}>{curMo.label}</div>
+        <div style={{display:"flex",gap:4}}>
+          <button className="btn ga" onClick={downloadCSV}>⬇ CSV</button>
+          <button className="btn pa" onClick={downloadJSON}>⬇ JSON</button>
+        </div>
+      </div>
+
+      <div style={{flex:1,overflow:"auto",padding:"12px 14px"}}>
+        {viewMode==="snapshot"&&(
+          <div>
+            <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8,marginBottom:12}}>
+              {totalIn.map(r=>{
+                const net=r.inflow-r.outflow;
+                return(
+                  <div key={r.id} style={{background:T.panel,border:`1px solid ${r.color}44`,borderRadius:5,padding:"10px 12px"}}>
+                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
+                      <div style={{display:"flex",alignItems:"center",gap:6}}>
+                        <span style={{fontSize:16}}>{r.flag}</span>
+                        <span style={{fontSize:11,color:r.color,fontWeight:700,fontFamily:"Space Grotesk"}}>{r.name}</span>
+                      </div>
+                      <span style={{fontSize:10,color:net>0?T.green:T.red,fontWeight:700,fontFamily:"JetBrains Mono"}}>{net>0?"+":""}${Math.round(net)}B</span>
+                    </div>
+                    <div style={{display:"flex",gap:10,marginBottom:6}}>
+                      <div style={{flex:1}}>
+                        <div style={{fontSize:7,color:T.muted,fontFamily:"JetBrains Mono",marginBottom:1}}>유입</div>
+                        <div style={{fontSize:11,color:T.green,fontWeight:700,fontFamily:"JetBrains Mono"}}>${r.inflow}B</div>
+                      </div>
+                      <div style={{flex:1}}>
+                        <div style={{fontSize:7,color:T.muted,fontFamily:"JetBrains Mono",marginBottom:1}}>유출</div>
+                        <div style={{fontSize:11,color:T.red,fontWeight:700,fontFamily:"JetBrains Mono"}}>${r.outflow}B</div>
+                      </div>
+                    </div>
+                    <div style={{height:4,background:T.dim,borderRadius:2,overflow:"hidden"}}>
+                      <div style={{width:`${Math.min((r.inflow/(r.inflow+r.outflow||1))*100,100)}%`,height:"100%",background:net>0?T.green:T.red,borderRadius:2}}/>
+                    </div>
+                    <div style={{fontSize:8,color:T.muted,fontFamily:"JetBrains Mono",marginTop:4}}>{r.gdpGrowth>0?"GDP ▲":"GDP ▼"}{r.gdpGrowth}% · CPI {r.cpi}% · PMI {r.pmi}</div>
+                  </div>
+                );
+              })}
+            </div>
+            <div style={{marginBottom:12}}>
+              <div style={{fontSize:9,color:T.muted,fontFamily:"JetBrains Mono",fontWeight:700,marginBottom:6,letterSpacing:".1em"}}>TOP FLOWS · {curMo.label}</div>
+              <div style={{display:"grid",gridTemplateColumns:"repeat(2,1fr)",gap:5}}>
+                {topFlows.map((f,i)=>{
+                  const fr=REGIONS.find(r=>r.id===f.from),tr=REGIONS.find(r=>r.id===f.to);
+                  const prev=moIdx>0?f.amounts[moIdx-1]:f.amounts[0];const delta=f.amt-prev;
+                  return(
+                    <div key={i} style={{background:T.panel,borderRadius:4,padding:"8px 10px",border:`1px solid ${f.color}33`}}>
+                      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:3}}>
+                        <span style={{fontSize:9,color:(fr&&fr.color),fontFamily:"JetBrains Mono",fontWeight:700}}>{(fr&&fr.flag)}{(fr&&fr.name)} → {(tr&&tr.flag)}{(tr&&tr.name)}</span>
+                        <span style={{fontSize:9,color:delta>=0?T.green:T.red,fontFamily:"JetBrains Mono"}}>{delta>=0?"▲":"▼"}${Math.abs(delta)}B</span>
+                      </div>
+                      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                        <span style={{fontSize:13,fontWeight:700,color:f.color,fontFamily:"JetBrains Mono"}}>${f.amt}B</span>
+                        <Spark data={f.amounts} width={70} height={22}/>
+                      </div>
+                      <div style={{fontSize:7,color:T.dim,fontFamily:"JetBrains Mono",marginTop:2}}>{f.label}</div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {viewMode==="timeline"&&(
+          <div>
+            <div style={{fontSize:9,color:T.muted,fontFamily:"JetBrains Mono",fontWeight:700,marginBottom:8,letterSpacing:".1em"}}>24개월 타임라인 · 모든 자금 흐름</div>
+            {FLOWS.map(f=>{
+              const fr=REGIONS.find(r=>r.id===f.from),tr=REGIONS.find(r=>r.id===f.to);const maxV=Math.max(...f.amounts);
+              return(
+                <div key={`${f.from}-${f.to}`} style={{background:T.panel,borderRadius:4,padding:"8px 10px",marginBottom:5,border:`1px solid ${f.color}22`}}>
+                  <div style={{display:"flex",justifyContent:"space-between",marginBottom:5}}>
+                    <span style={{fontSize:9,color:(fr&&fr.color),fontFamily:"JetBrains Mono",fontWeight:700}}>{(fr&&fr.flag)} {(fr&&fr.name)} → {(tr&&tr.flag)} {(tr&&tr.name)}</span>
+                    <span style={{fontSize:9,fontWeight:700,color:f.color,fontFamily:"JetBrains Mono"}}>${f.amounts[moIdx]}B</span>
+                  </div>
+                  <div style={{display:"flex",alignItems:"flex-end",gap:1,height:40}}>
+                    {f.amounts.map((v,i)=>{const bh=(v/maxV)*38;const isCur=i===moIdx;return(
+                      <div key={i} onClick={()=>setMoIdx(i)} style={{flex:1,display:"flex",flexDirection:"column",justifyContent:"flex-end",cursor:"pointer",height:40}}>
+                        <div style={{width:"100%",height:bh,background:isCur?f.color:f.color+"44",borderRadius:"2px 2px 0 0",transition:"height .2s"}}/>
+                      </div>
+                    );})}
+                  </div>
+                  <div style={{display:"flex",justifyContent:"space-between",marginTop:2}}>
+                    {MONTHS.filter((_,i)=>i%6===0).map((m,i)=><span key={i} style={{fontSize:7,color:T.dim,fontFamily:"JetBrains Mono"}}>{m.label.slice(2)}</span>)}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        {viewMode==="heatmap"&&(
+          <div>
+            <div style={{fontSize:9,color:T.muted,fontFamily:"JetBrains Mono",fontWeight:700,marginBottom:8}}>지역간 자금 흐름 매트릭스 (현재: {curMo.label})</div>
+            <div style={{overflowX:"auto"}}>
+              <table style={{borderCollapse:"collapse",fontFamily:"JetBrains Mono",fontSize:9,minWidth:600}}>
+                <thead>
+                  <tr>
+                    <th style={{padding:"6px 10px",color:T.muted,textAlign:"left",borderBottom:`1px solid ${T.border}`,fontSize:8}}>FROM↓ TO→</th>
+                    {REGIONS.map(r=><th key={r.id} style={{padding:"6px 8px",color:r.color,fontSize:8,borderBottom:`1px solid ${T.border}`,fontWeight:700,minWidth:62}}>{r.flag}{r.name}</th>)}
+                    <th style={{padding:"6px 8px",color:T.gold,fontSize:8,borderBottom:`1px solid ${T.border}`,fontWeight:700}}>총유출</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {REGIONS.map(fr=>{
+                    const rowFlows=REGIONS.map(tr=>{if(fr.id===tr.id)return null;return curFlows.find(f=>f.from===fr.id&&f.to===tr.id)||null;});
+                    const rowTotal=rowFlows.reduce((s,f)=>s+((f&&f.amt)||0),0);
+                    return(
+                      <tr key={fr.id}>
+                        <td style={{padding:"6px 10px",color:fr.color,fontWeight:700,borderBottom:`1px solid ${T.border}22`,whiteSpace:"nowrap"}}>{fr.flag} {fr.name}</td>
+                        {REGIONS.map((tr,i)=>{
+                          const f=rowFlows[i];
+                          if(fr.id===tr.id)return<td key={tr.id} style={{padding:"6px 8px",background:T.dim+"44",borderBottom:`1px solid ${T.border}22`}}>—</td>;
+                          if(!f)return<td key={tr.id} style={{padding:"6px 8px",color:T.dim,textAlign:"right",borderBottom:`1px solid ${T.border}22`}}>·</td>;
+                          const bg=`rgba(0,212,255,${Math.min((f.amt/300)*.4,.4)})`;
+                          return(<td key={tr.id} style={{padding:"6px 8px",background:bg,color:T.accent,fontWeight:700,textAlign:"right",borderBottom:`1px solid ${T.border}22`}}>${f.amt}</td>);
+                        })}
+                        <td style={{padding:"6px 8px",color:T.red,fontWeight:700,textAlign:"right",borderBottom:`1px solid ${T.border}22`,borderLeft:`1px solid ${T.border}`}}>${rowTotal}B</td>
+                      </tr>
+                    );
+                  })}
+                  <tr>
+                    <td style={{padding:"6px 10px",color:T.gold,fontWeight:700,fontSize:8}}>총유입</td>
+                    {REGIONS.map(tr=>{const total=curFlows.filter(f=>f.to===tr.id).reduce((s,f)=>s+f.amt,0);return<td key={tr.id} style={{padding:"6px 8px",color:T.green,fontWeight:700,textAlign:"right",borderTop:`1px solid ${T.border}`}}>{total?`$${total}B`:""}</td>;})}
+                    <td/>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 
 function HedgeFundView(){
   const [sel,setSel]=useState(null);
@@ -1599,12 +1785,12 @@ function MarketsView(){
       setFxLive(true);
     }).catch(()=>{});
     fetch("https://api.coingecko.com/api/v3/simple/price?ids=bitcoin,ethereum,binancecoin,ripple,solana,cardano&vs_currencies=usd&include_24hr_change=true").then(r=>r.json()).then(d=>{
-      setCryptoData([{n:"BTC",p:d.bitcoin?.usd,c:d.bitcoin?.usd_24h_change},
-        {n:"ETH",p:d.ethereum?.usd,c:d.ethereum?.usd_24h_change},
-        {n:"BNB",p:d["binancecoin"]?.usd,c:d["binancecoin"]?.usd_24h_change},
-        {n:"XRP",p:d.ripple?.usd,c:d.ripple?.usd_24h_change},
-        {n:"SOL",p:d.solana?.usd,c:d.solana?.usd_24h_change},
-        {n:"ADA",p:d.cardano?.usd,c:d.cardano?.usd_24h_change}]);
+      setCryptoData([{n:"BTC",p:(d.bitcoin&&d.bitcoin.usd),c:(d.bitcoin&&d.bitcoin.usd)_24h_change},
+        {n:"ETH",p:(d.ethereum&&d.ethereum.usd),c:(d.ethereum&&d.ethereum.usd)_24h_change},
+        {n:"BNB",p:(d["binancecoin"]&&d["binancecoin"].usd),c:(d["binancecoin"]&&d["binancecoin"].usd)_24h_change},
+        {n:"XRP",p:(d.ripple&&d.ripple.usd),c:(d.ripple&&d.ripple.usd)_24h_change},
+        {n:"SOL",p:(d.solana&&d.solana.usd),c:(d.solana&&d.solana.usd)_24h_change},
+        {n:"ADA",p:(d.cardano&&d.cardano.usd),c:(d.cardano&&d.cardano.usd)_24h_change}]);
     }).catch(()=>{});
   },[]);
 
@@ -1695,7 +1881,7 @@ function MarketsView(){
                     <span style={{fontSize:12,color:T.gold,fontWeight:700,fontFamily:"JetBrains Mono"}}>{x.n}</span>
                     <span style={{fontSize:7,color:T.green,background:T.green+"12",padding:"2px 5px",borderRadius:2,fontFamily:"JetBrains Mono"}}>● LIVE</span>
                   </div>
-                  <div style={{fontSize:15,color:T.text,fontWeight:700,fontFamily:"JetBrains Mono"}}>${x.p?.toLocaleString("en-US",{maximumFractionDigits:2})}</div>
+                  <div style={{fontSize:15,color:T.text,fontWeight:700,fontFamily:"JetBrains Mono"}}>${(x.p&&x.p.toLocaleString)("en-US",{maximumFractionDigits:2})}</div>
                   <div style={{fontSize:10,color:(x.c||0)>=0?T.green:T.red,fontFamily:"JetBrains Mono"}}>{(x.c||0)>=0?"▲":"▼"}{Math.abs(x.c||0).toFixed(2)}%</div>
                 </div>
               ))}
@@ -1716,7 +1902,7 @@ function MarketsView(){
             </div>
             <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:7,marginBottom:14}}>
               {commItems.map(x=>{
-                const val=x.p??x.fb;
+                const val=x.p!=null?x.p:x.fb;
                 return(
                   <div key={x.s} style={{background:T.panel,borderRadius:5,padding:"12px 13px",border:`1px solid ${x.col}33`}}>
                     <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:5}}>
@@ -1747,7 +1933,7 @@ function MarketsView(){
               <div style={{background:T.panel,border:`1px solid ${T.green}44`,borderRadius:6,padding:"12px 14px",marginBottom:14}}>
                 <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
                   <span style={{fontSize:10,color:T.green,fontFamily:"JetBrains Mono",fontWeight:700}}>🏛 FRED 실시간 · 미국 주요 거시지표</span>
-                  <span style={{fontSize:7,color:T.muted,fontFamily:"JetBrains Mono"}}>업데이트: {live.lastUpdated?.toLocaleTimeString("ko-KR",{hour12:false})}</span>
+                  <span style={{fontSize:7,color:T.muted,fontFamily:"JetBrains Mono"}}>업데이트: {(live.lastUpdated&&live.lastUpdated.toLocaleTimeString)("ko-KR",{hour12:false})}</span>
                 </div>
                 <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:8}}>
                   {[
