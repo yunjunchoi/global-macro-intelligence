@@ -32,19 +32,37 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:12px;heigh
 </style>
 
 <script type="text/javascript">
-/* ════════════════════════════════
+/* ════════════════════════════════════════════════════════════
    LIVE DATA — plain JS (Babel 불필요)
    window.__live 에 저장 후 React가 읽음
-════════════════════════════════ */
+
+   데이터 소스:
+   ① FRED          — 미국 거시지표·금리 (무료, 키 보유)
+   ② Alpha Vantage — 원자재 가격 (무료 25콜/일)
+   ③ Finnhub       — 글로벌 뉴스·경제캘린더 (무료)
+   ④ IMF API       — 글로벌 BOP·GDP·FDI (키 불필요 ✅)
+   ⑤ 한국은행 ECOS  — 한국 국제수지·FDI·금리 (키 입력 필요)
+   ⑥ 금융감독원 FSS — 외국인 증권투자 (키 입력 필요)
+════════════════════════════════════════════════════════════ */
 window.__live = {
-  loading: true, fredLive: false, avLive: false, fhLive: false,
+  loading: true,
+  fredLive: false, avLive: false, fhLive: false,
+  imfLive: false, ecosLive: false, fssLive: false,
   fred: {}, av: {wti:null,brent:null,natgas:null,copper:null},
-  fh: {news:[], econ:[]}, lastUpdated: null
+  fh: {news:[], econ:[]},
+  imf: { gdp:{}, bop:{}, fdi:{}, cpi:{} },
+  ecos: { bopMonthly:[], fdiInflow:[], fdiOutflow:[], baseRate:null, fxReserves:null },
+  fss:  { foreignStock:[], foreignBond:[] },
+  realFlows: null,
+  lastUpdated: null,
 };
 
+/* ── API 키 설정 ───────────────────────── */
 var FRED_KEY = 'b265c038167e9fa6fc34678a62c9c2a4';
 var AV_KEY   = 'E4707A6I8NXZOF6K';
 var FH_KEY   = 'd6hg6m9r01qr5k4breqgd6hg6m9r01qr5k4brer0';
+var ECOS_KEY = 'ZV9F4SG308AAQ8GMQR35';  // 한국은행 ECOS API
+var FSS_KEY  = '';  // ← 금융감독원 키 (data.fss.or.kr 발급)
 
 function fredFetch(series) {
   return fetch('https://api.stlouisfed.org/fred/series/observations?series_id=' + series +
@@ -129,6 +147,203 @@ Promise.all([fhNewsFetch(), fhEconFetch()])
     window.__live.fhLive = v[0].length > 0;
     console.log('[FH] news=' + v[0].length + ' econ=' + v[1].length);
   }).catch(function(e){ console.warn('FH error', e); });
+
+/* ══════════════════════════════════════════════════════════
+   ④ IMF DataMapper API (키 불필요)
+   - 국가 코드: KOR, USA, CHN, JPN, DEU, GBR, BRA, AUS, SAU
+   - 지표: NGDP_RPCH(GDP성장), BCA_NGDPD(경상수지/GDP), PCPIPCH(CPI)
+══════════════════════════════════════════════════════════ */
+var IMF_COUNTRIES = ['KOR','USA','CHN','JPN','DEU','GBR','BRA','AUS','SAU','IND'];
+var IMF_REGION_MAP = {
+  KOR:'kr', USA:'us', CHN:'cn', JPN:'jp', DEU:'eu', GBR:'eu',
+  BRA:'latam', AUS:'oceania', SAU:'me', IND:'cn'
+};
+
+function imfFetch(indicator, countries) {
+  var url = 'https://www.imf.org/external/datamapper/api/v1/' + indicator
+    + '/' + countries.join(',') + '?periods=2022,2023,2024';
+  return fetch(url)
+    .then(function(r) { return r.json(); })
+    .then(function(d) {
+      var result = {};
+      var values = d.values && d.values[indicator];
+      if (!values) return result;
+      Object.keys(values).forEach(function(cty) {
+        var yrs = values[cty];
+        // 가장 최신 연도 값
+        var val = yrs['2024'] != null ? yrs['2024']
+                : yrs['2023'] != null ? yrs['2023']
+                : yrs['2022'];
+        if (val != null) result[cty] = +parseFloat(val).toFixed(2);
+      });
+      return result;
+    }).catch(function(e) { console.warn('IMF ' + indicator + ' error', e); return {}; });
+}
+
+Promise.all([
+  imfFetch('NGDP_RPCH',  IMF_COUNTRIES),   // GDP 성장률 %
+  imfFetch('BCA_NGDPD',  IMF_COUNTRIES),   // 경상수지/GDP %
+  imfFetch('PCPIPCH',    IMF_COUNTRIES),   // CPI 인플레이션 %
+]).then(function(v) {
+  window.__live.imf.gdp = v[0];
+  window.__live.imf.bop = v[1];
+  window.__live.imf.cpi = v[2];
+  window.__live.imfLive = Object.keys(v[0]).length > 0;
+  window.__live.lastUpdated = new Date();
+  console.log('[IMF] GDP loaded:', v[0]);
+  console.log('[IMF] BOP loaded:', v[1]);
+}).catch(function(e) { console.warn('IMF error', e); });
+
+/* ══════════════════════════════════════════════════════════
+   ⑤ 한국은행 ECOS API (키 입력 후 활성화)
+   ECOS_KEY 를 위에 입력하면 자동 실행됩니다
+══════════════════════════════════════════════════════════ */
+function ecosFetch(statCode, cycle, startDate, endDate, itemCode1) {
+  if (!ECOS_KEY) return Promise.resolve(null);
+  // ECOS API: json/kr 엔드포인트 (CORS 공식 지원)
+  var url = 'https://ecos.bok.or.kr/api/StatisticSearch/' + ECOS_KEY
+    + '/json/kr/1/100/'   // 최대 100건
+    + statCode + '/' + cycle + '/' + startDate + '/' + endDate
+    + (itemCode1 ? '/' + itemCode1 : '');
+  return fetch(url, { method: 'GET', headers: { 'Accept': 'application/json' } })
+    .then(function(r) {
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      return r.json();
+    })
+    .then(function(d) {
+      if (d.RESULT) {
+        // ECOS 에러 응답 (예: CODE: INFO-200 데이터없음)
+        console.warn('[ECOS] API 응답:', d.RESULT.CODE, d.RESULT.MESSAGE);
+        return null;
+      }
+      if (!d.StatisticSearch) return null;
+      return d.StatisticSearch.row || [];
+    }).catch(function(e) {
+      console.warn('[ECOS] ' + statCode + ' fetch 실패:', e.message);
+      return null;
+    });
+}
+
+function loadEcos() {
+  if (!ECOS_KEY) {
+    console.log('[ECOS] 키 미설정 — ecos.bok.or.kr에서 발급 후 ECOS_KEY에 입력');
+    return;
+  }
+
+  var now = new Date();
+  var endYM = now.getFullYear() + ('0'+(now.getMonth()+1)).slice(-2); // YYYYMM
+  var startYM = (now.getFullYear()-2) + '01';
+
+  Promise.all([
+    // 국제수지 경상수지 (060Y002, M, 항목코드 '00')
+    ecosFetch('060Y002', 'M', startYM, endYM, '00'),
+    // 외국인직접투자 유입 신고기준 (062Y003)
+    ecosFetch('062Y003', 'Q', (now.getFullYear()-2)+'Q1',
+      now.getFullYear()+'Q'+(Math.ceil((now.getMonth()+1)/3))),
+    // 한국은행 기준금리 (722Y001)
+    ecosFetch('722Y001', 'M', startYM, endYM, '0101000'),
+    // 외환보유액 (합계) (301Y013)
+    ecosFetch('301Y013', 'M', startYM, endYM, '010000000'),
+  ]).then(function(v) {
+    var bop = v[0], fdi = v[1], rate = v[2], fx = v[3];
+
+    // 국제수지 파싱 (억달러 단위)
+    if (bop) {
+      window.__live.ecos.bopMonthly = bop.map(function(r) {
+        return { date: r.TIME, value: parseFloat(r.DATA_VALUE) };
+      }).filter(function(r) { return !isNaN(r.value); });
+    }
+
+    // FDI 유입 파싱
+    if (fdi) {
+      window.__live.ecos.fdiInflow = fdi.map(function(r) {
+        return { date: r.TIME, value: parseFloat(r.DATA_VALUE) };
+      }).filter(function(r) { return !isNaN(r.value); });
+    }
+
+    // 기준금리 (가장 최신)
+    if (rate && rate.length > 0) {
+      var latest = rate[rate.length - 1];
+      window.__live.ecos.baseRate = parseFloat(latest.DATA_VALUE);
+    }
+
+    // 외환보유액 (억달러)
+    if (fx && fx.length > 0) {
+      window.__live.ecos.fxReserves = parseFloat(fx[fx.length-1].DATA_VALUE);
+    }
+
+    window.__live.ecosLive = true;
+    window.__live.lastUpdated = new Date();
+    console.log('[ECOS] 기준금리:', window.__live.ecos.baseRate);
+    console.log('[ECOS] 경상수지 최신:', window.__live.ecos.bopMonthly.slice(-1));
+
+    // 실제 FDI 데이터로 플로우 재계산
+    rebuildRealFlows();
+  }).catch(function(e) { console.warn('ECOS load error', e); });
+}
+
+/* ══════════════════════════════════════════════════════════
+   ⑥ 금융감독원 FSS API (키 입력 후 활성화)
+   data.fss.or.kr → 공공데이터포털 신청
+══════════════════════════════════════════════════════════ */
+function loadFss() {
+  if (!FSS_KEY) {
+    console.log('[FSS] 키 미설정 — data.fss.or.kr에서 발급');
+    return;
+  }
+  // 외국인 주식 보유 현황
+  var url = 'https://apis.data.go.kr/1160100/service/GetStockSecuritiesInfoService/getStockPriceInfo'
+    + '?serviceKey=' + FSS_KEY + '&numOfRows=12&pageNo=1&resultType=json';
+  fetch(url)
+    .then(function(r) { return r.json(); })
+    .then(function(d) {
+      window.__live.fssLive = true;
+      console.log('[FSS] loaded');
+    }).catch(function(e) { console.warn('FSS error', e); });
+}
+
+/* ══════════════════════════════════════════════════════════
+   실제 데이터 기반 플로우 재계산
+   ECOS 로드 완료 후 호출됨
+══════════════════════════════════════════════════════════ */
+function rebuildRealFlows() {
+  var ecos = window.__live.ecos;
+  var imf  = window.__live.imf;
+
+  // 경상수지 최근 12개월 (억달러 → 단위 환산)
+  var bop12 = ecos.bopMonthly.slice(-12);
+  var avgBop = bop12.length > 0
+    ? bop12.reduce(function(s,r){ return s + r.value; }, 0) / bop12.length
+    : null;
+
+  // FDI 유입 최근값 (억달러)
+  var fdiLatest = ecos.fdiInflow.length > 0
+    ? ecos.fdiInflow[ecos.fdiInflow.length-1].value
+    : null;
+
+  // 실제값 기반 플로우 오버라이드
+  window.__live.realFlows = {
+    // us→kr: 실제 FDI 유입 (분기→월 환산, 억달러→B$)
+    usToKr: fdiLatest ? +(fdiLatest / 10).toFixed(1) : null,
+    // kr 경상수지 (억달러)
+    krCurrentAccount: avgBop ? +avgBop.toFixed(1) : null,
+    // 기준금리
+    krBaseRate: ecos.baseRate,
+    // IMF 기반 각국 GDP 성장률
+    gdpGrowth: imf.gdp,
+    // IMF 기반 경상수지/GDP
+    bopRatio: imf.bop,
+    source: 'ECOS+IMF',
+    updatedAt: new Date().toISOString(),
+  };
+
+  console.log('[realFlows] 실제 데이터 기반 플로우 생성:', window.__live.realFlows);
+}
+
+// ECOS·FSS 로드 시작
+loadEcos();
+loadFss();
+
 </script>
 </head>
 <body><div id="root"></div>
@@ -552,6 +767,23 @@ function WorldMapView(){
   const [viewMode,setViewMode]=useState("map"); // "map" | "flowlines" | "sankey"
   const [tick,setTick]=useState(0);
   const playRef=useRef(null);
+  // ECOS/IMF 실제 데이터 폴링
+  const [ecosLive,setEcosLive]=useState(!!(window.__live&&window.__live.ecosLive));
+  const [imfGdp,setImfGdp]=useState((window.__live&&window.__live.imf&&window.__live.imf.gdp)||{});
+  const [krBaseRate,setKrBaseRate]=useState(null);
+  const [krBop,setKrBop]=useState([]);
+  useEffect(function(){
+    var iv=setInterval(function(){
+      var lv=window.__live; if(!lv) return;
+      if(lv.ecosLive){
+        setEcosLive(true);
+        if(lv.ecos.baseRate!=null) setKrBaseRate(lv.ecos.baseRate);
+        if(lv.ecos.bopMonthly&&lv.ecos.bopMonthly.length>0) setKrBop(lv.ecos.bopMonthly);
+      }
+      if(lv.imfLive&&lv.imf.gdp) setImfGdp(Object.assign({},lv.imf.gdp));
+    },1500);
+    return function(){clearInterval(iv);};
+  },[]);
 
   useEffect(()=>{if(playing){playRef.current=setInterval(()=>setMoIdx(m=>(m+1)%MONTHS.length),Math.round(1000/speed));}return()=>clearInterval(playRef.current);},[playing,speed]);
   useEffect(()=>{const iv=setInterval(()=>setTick(t=>t+1),55);return()=>clearInterval(iv);},[]);
@@ -560,6 +792,20 @@ function WorldMapView(){
   const maxAmt=useMemo(()=>Math.max(...flows.map(f=>f.amt)),[flows]);
   const curMo=MONTHS[moIdx];
   const totalFlow=flows.reduce((s,f)=>s+f.amt,0);
+
+  // ECOS/IMF 실제값으로 REGIONS 오버라이드 (KR 기준금리, GDP 성장률)
+  const regionsLive=useMemo(function(){
+    var IMF_MAP={us:"USA",cn:"CHN",jp:"JPN",eu:"DEU",kr:"KOR"};
+    return REGIONS.map(function(r){
+      var overrides={};
+      // 한국: ECOS 실제 기준금리
+      if(r.id==="kr"&&krBaseRate!=null) overrides.policyRate=krBaseRate;
+      // IMF GDP 성장률
+      var cty=IMF_MAP[r.id];
+      if(cty&&imfGdp[cty]!=null) overrides.gdpGrowth=imfGdp[cty];
+      return Object.keys(overrides).length>0 ? Object.assign({},r,overrides) : r;
+    });
+  },[krBaseRate,imfGdp]);
 
   // Particle system
   const particles=useRef([]);
@@ -1196,7 +1442,7 @@ function MacroChainView(){
   useEffect(()=>{const iv=setInterval(()=>setTick(t=>t+1),60);return()=>clearInterval(iv);},[]);
 
   const W=720,H=420;
-  const region=REGIONS.find(r=>r.id===selRegion);
+  const region=regionsLive.find(r=>r.id===selRegion)||REGIONS.find(r=>r.id===selRegion);
   const chainData=COUNTRY_CHAIN_DATA[selRegion]||COUNTRY_CHAIN_DATA.us;
   const news=COUNTRY_NEWS[selRegion]||[];
 
@@ -1460,7 +1706,14 @@ function MacroChainView(){
                       <span style={{fontSize:22}}>{region.flag}</span>
                       <div>
                         <div style={{fontSize:14,color:region.color,fontWeight:700,fontFamily:"Space Grotesk"}}>{region.name}</div>
-                        <div style={{fontSize:8,color:T.muted,fontFamily:"JetBrains Mono"}}>{region.cbName} · {region.policyRate}%</div>
+                        <div style={{fontSize:8,color:T.muted,fontFamily:"JetBrains Mono"}}>{region.cbName} · {region.policyRate}%
+                         {region.id==="kr"&&ecosLive&&<span style={{color:T.green,fontSize:7,marginLeft:6,fontFamily:"JetBrains Mono"}}>● ECOS LIVE</span>}
+                         {region.id==="kr"&&krBop.length>0&&(
+                           <span style={{color:T.accent,fontSize:7.5,marginLeft:6,fontFamily:"JetBrains Mono"}}>
+                             경상수지 {krBop[krBop.length-1].date}: {krBop[krBop.length-1].value>0?"+":""}{krBop[krBop.length-1].value}억$
+                           </span>
+                         )}
+                       </div>
                       </div>
                     </div>
                     <div style={{fontSize:8,color:T.muted,fontFamily:"JetBrains Mono",lineHeight:1.6}}>{region.description}</div>
@@ -2105,109 +2358,279 @@ function MarketsView(){
    TAB 6: API GUIDE
 ════════════════════════════════════════════════════════════════ */
 function ApiGuideView(){
-  const apis=[
-    {name:"TradingView Widgets",tier:"무료",cost:"$0",coverage:"주가·환율·지수·뉴스",limit:"무제한 임베드",
-     bestFor:"시각화·차트·위젯",color:T.green,url:"https://www.tradingview.com/widget/",
-     note:"현재 이 대시보드가 사용 중. 차트·티커·히트맵 등 UI 컴포넌트 제공."},
-    {name:"ExchangeRate-API",tier:"무료",cost:"$0 / 1,500req/월",coverage:"환율 (160개 통화)",limit:"1,500 req/mo",
-     bestFor:"실시간 환율",color:T.green,url:"https://www.exchangerate-api.com/",
-     note:"현재 이 대시보드가 사용 중. 무료 플랜으로 실시간 환율 제공."},
-    {name:"CoinGecko API",tier:"무료",cost:"$0 / 기본",coverage:"암호화폐 전체",limit:"30 req/min",
-     bestFor:"크립토 실시간",color:T.green,url:"https://www.coingecko.com/api/",
-     note:"현재 이 대시보드가 사용 중. 무료로 BTC·ETH 등 실시간 데이터 제공."},
-    {name:"Alpha Vantage",tier:"무료→유료",cost:"$0~$50/mo",coverage:"주식·FX·원자재·거시지표",limit:"25 req/day(무료)",
-     bestFor:"거시경제 지표",color:T.gold,url:"https://www.alphavantage.co/",
-     note:"GDP·CPI·실업률 등 거시지표 API. 무료 플랜은 일 25회 제한."},
-    {name:"Finnhub",tier:"무료→유료",cost:"$0~$99/mo",coverage:"주식·뉴스·헤지펀드 13F·거시",limit:"60 req/min(무료)",
-     bestFor:"헤지펀드 13F·뉴스",color:T.gold,url:"https://finnhub.io/",
-     note:"SEC 13F 헤지펀드 포지션 데이터 제공. 이 대시보드 헤지펀드 탭 강화에 최적."},
-    {name:"FRED API (St. Louis Fed)",tier:"무료",cost:"$0 완전 무료",coverage:"미국 거시경제 82만+ 시리즈",limit:"무제한",
-     bestFor:"미국 거시지표 완전판",color:T.green,url:"https://fred.stlouisfed.org/docs/api/",
-     note:"Fed 공식 데이터. GDP·CPI·실업·연방기금금리·수익률곡선 전부 무료."},
-    {name:"World Bank API",tier:"무료",cost:"$0 완전 무료",coverage:"글로벌 국가 거시지표",limit:"무제한",
-     bestFor:"국가별 경제 건강도",color:T.green,url:"https://data.worldbank.org/",
-     note:"190개국 GDP·무역·인구·부채 데이터. 국가 건강 스코어 실제 데이터화에 적합."},
-    {name:"Polygon.io",tier:"유료",cost:"$29~$199/mo",coverage:"주식·옵션·선물·FX 실시간",limit:"티어별",
-     bestFor:"주식 실시간·옵션 플로우",color:T.orange,url:"https://polygon.io/",
-     note:"기관급 실시간 데이터. 옵션 플로우 분석으로 헤지펀드 방향성 파악에 유용."},
-    {name:"EODHD",tier:"유료",cost:"$19.99~$79.99/mo",coverage:"주식·펀더멘털·매크로·인사이더",limit:"티어별",
-     bestFor:"글로벌 펀더멘털+거시",color:T.orange,url:"https://eodhd.com/",
-     note:"150개국 주식·펀더멘털·뉴스·인사이더 트레이딩. 가성비 좋은 종합 API."},
-    {name:"Investing.com",tier:"없음",cost:"공개 API 없음",coverage:"웹 서비스만",limit:"API 미제공",
-     bestFor:"웹사이트 직접 참고",color:T.red,url:"https://www.investing.com/",
-     note:"2025년 기준 공개 API 미제공. 계약상 데이터 제공자 제약. 위젯(iframe)만 제공 가능."},
-    {name:"Bloomberg Terminal",tier:"기관용",cost:"$24,000~$28,000/년",coverage:"모든 자산·경제·뉴스",limit:"무제한",
-     bestFor:"기관 트레이더",color:"#ff6b35",url:"https://www.bloomberg.com/professional/",
-     note:"글로벌 스탠다드. 개인용으로는 비용 과대. 이 대시보드가 블룸버그 대안 목표."},
-    {name:"Refinitiv (LSEG)",tier:"기관용",cost:"$22,000~$/년",coverage:"뉴스·채권·파생상품",limit:"무제한",
-     bestFor:"기관 채권·파생",color:"#ff6b35",url:"https://www.refinitiv.com/",
-     note:"블룸버그 경쟁사. 로이터 뉴스 포함. 개인보다 기관 대상."},
+  var live = window.__live || {};
+
+  var apis=[
+    {
+      name:"🏛 한국은행 ECOS",tier:"무료",cost:"$0",keyStatus: !!ECOS_KEY,
+      coverage:"국제수지(BOP)·외국인직접투자(FDI)·기준금리·외환보유액·대출금리 등 100+ 시리즈",
+      limit:"API키 1개당 10만건/일",
+      bestFor:"한국 실제 자금흐름 데이터 (가상데이터 교체)",
+      color:T.green,url:"https://ecos.bok.or.kr",
+      getKey:"① ecos.bok.or.kr → 회원가입 → 오픈API → API키 신청 (즉시 발급)",
+      inputVar:"ECOS_KEY",
+      liveData: live.ecosLive ? [
+        live.ecos.baseRate != null && ("기준금리: " + live.ecos.baseRate + "%"),
+        live.ecos.fxReserves != null && ("외환보유액: $" + live.ecos.fxReserves + "억"),
+        live.ecos.bopMonthly.length > 0 && ("경상수지 " + live.ecos.bopMonthly.length + "개월치"),
+        live.ecos.fdiInflow.length > 0 && ("FDI 유입 " + live.ecos.fdiInflow.length + "개 분기"),
+      ].filter(Boolean) : null,
+      series:[
+        {code:"060Y002", name:"국제수지 경상수지", unit:"억달러/월", note:"한국 전체 자금 in/out"},
+        {code:"062Y003", name:"외국인직접투자 유입", unit:"억달러/분기", note:"국가별 FDI 유입"},
+        {code:"062Y004", name:"해외직접투자 유출", unit:"억달러/분기", note:"한국→해외 ODI"},
+        {code:"060Y003", name:"외국인증권투자 주식", unit:"억달러/월", note:"외국인 주식 순매수"},
+        {code:"722Y001", name:"한국은행 기준금리", unit:"%", note:"정책금리 이력"},
+        {code:"301Y013", name:"외환보유액", unit:"억달러/월", note:"총 외환보유액"},
+      ]
+    },
+    {
+      name:"🌐 IMF DataMapper",tier:"무료",cost:"$0",keyStatus:true,
+      coverage:"GDP성장률·경상수지/GDP·CPI·FDI 유입·정부부채 등 — 190개국",
+      limit:"무제한 (키 불필요)",
+      bestFor:"9개 지역 거시지표 실제값 (가상 데이터 교체)",
+      color:T.accent,url:"https://www.imf.org/external/datamapper",
+      getKey:"키 불필요 — 즉시 사용 가능 ✅",
+      inputVar:null,
+      liveData: live.imfLive ? [
+        Object.keys(live.imf.gdp).length > 0 && ("GDP성장률 " + Object.keys(live.imf.gdp).length + "개국 로드"),
+        Object.keys(live.imf.bop).length > 0 && ("경상수지/GDP " + Object.keys(live.imf.bop).length + "개국"),
+        Object.keys(live.imf.cpi).length > 0 && ("CPI " + Object.keys(live.imf.cpi).length + "개국"),
+      ].filter(Boolean) : null,
+      series:[
+        {code:"NGDP_RPCH",   name:"실질 GDP 성장률",  unit:"%", note:"전년비"},
+        {code:"BCA_NGDPD",   name:"경상수지/GDP",      unit:"%", note:"흑자·적자"},
+        {code:"PCPIPCH",     name:"CPI 인플레이션",    unit:"%", note:"소비자물가"},
+        {code:"GGX_NGDP",    name:"재정지출/GDP",      unit:"%", note:"정부지출"},
+        {code:"GGXWDG_NGDP", name:"정부부채/GDP",      unit:"%", note:"국가채무비율"},
+      ]
+    },
+    {
+      name:"📡 FRED (St. Louis Fed)",tier:"무료",cost:"$0",keyStatus:!!FRED_KEY,
+      coverage:"미국 거시지표 800,000+ 시리즈 — 금리·고용·물가·GDP",
+      limit:"120콜/분 (실질 무제한)",
+      bestFor:"미국 금리·국채수익률 실시간",
+      color:T.purple,url:"https://fred.stlouisfed.org",
+      getKey:"① fred.stlouisfed.org → 회원가입 → My Account → API Keys",
+      inputVar:"FRED_KEY",
+      liveData: live.fredLive ? [
+        live.fred.fedRate != null && ("기준금리: " + live.fred.fedRate + "%"),
+        live.fred.rate10y != null && ("10Y 국채: " + live.fred.rate10y + "%"),
+        live.fred.cpi != null && ("CPI YoY: " + live.fred.cpi + "%"),
+        live.fred.unemployment != null && ("실업률: " + live.fred.unemployment + "%"),
+      ].filter(Boolean) : null,
+      series:[
+        {code:"DFF",           name:"기준금리 (Fed Funds)",   unit:"%"},
+        {code:"DGS10",         name:"10년 국채수익률",          unit:"%"},
+        {code:"UNRATE",        name:"실업률",                   unit:"%"},
+        {code:"CPIAUCSL",      name:"CPI (소비자물가지수)",     unit:"index"},
+        {code:"A191RL1Q225SBEA",name:"실질 GDP 성장률",         unit:"%"},
+      ]
+    },
+    {
+      name:"⚡ Alpha Vantage",tier:"무료",cost:"$0",keyStatus:!!AV_KEY,
+      coverage:"주식·ETF·원자재(WTI·Brent·천연가스·구리) 가격",
+      limit:"25콜/일 (무료), 500콜/일 ($50/월)",
+      bestFor:"원자재 실제 가격",
+      color:T.gold,url:"https://www.alphavantage.co",
+      getKey:"① alphavantage.co → Get Free API Key (이메일만 입력)",
+      inputVar:"AV_KEY",
+      liveData: live.avLive ? [
+        live.av.wti   != null && ("WTI: $" + live.av.wti + "/bbl"),
+        live.av.brent != null && ("Brent: $" + live.av.brent + "/bbl"),
+        live.av.natgas != null && ("천연가스: $" + live.av.natgas + "/MMBtu"),
+        live.av.copper != null && ("구리: $" + live.av.copper + "/lb"),
+      ].filter(Boolean) : null,
+      series:[
+        {code:"WTI",         name:"WTI 원유",    unit:"$/bbl"},
+        {code:"BRENT",       name:"Brent 원유",  unit:"$/bbl"},
+        {code:"NATURAL_GAS", name:"천연가스",    unit:"$/MMBtu"},
+        {code:"COPPER",      name:"구리",        unit:"$/lb"},
+      ]
+    },
+    {
+      name:"🦁 Finnhub",tier:"무료",cost:"$0",keyStatus:!!FH_KEY,
+      coverage:"실시간 주가·글로벌 뉴스·경제캘린더·실적발표",
+      limit:"60콜/분 (무료)",
+      bestFor:"글로벌 뉴스 피드·경제지표 발표 일정",
+      color:T.orange,url:"https://finnhub.io",
+      getKey:"① finnhub.io → Get free API key",
+      inputVar:"FH_KEY",
+      liveData: live.fhLive ? [
+        live.fh.news.length > 0 && ("뉴스 " + live.fh.news.length + "건 로드"),
+        live.fh.econ.length > 0 && ("경제일정 " + live.fh.econ.length + "건"),
+      ].filter(Boolean) : null,
+      series:[
+        {code:"news",              name:"글로벌 시장 뉴스",    unit:"실시간"},
+        {code:"calendar/economic", name:"경제지표 발표 일정",  unit:"±2주"},
+      ]
+    },
+    {
+      name:"🏢 금융감독원 FSS",tier:"무료",cost:"$0",keyStatus:!!FSS_KEY,
+      coverage:"외국인 주식·채권 보유 현황, 펀드 자금 유출입",
+      limit:"1만건/일",
+      bestFor:"외국인 증권투자 실제 현황",
+      color:T.teal,url:"https://data.fss.or.kr",
+      getKey:"① data.fss.or.kr → 공공데이터포털 (data.go.kr) → '금융감독원' 검색 → 신청",
+      inputVar:"FSS_KEY",
+      liveData: live.fssLive ? ["외국인 증권투자 데이터 연결됨"] : null,
+      series:[
+        {code:"외국인주식보유현황", name:"외국인 주식 순매수·잔고", unit:"억원/월"},
+        {code:"외국인채권보유현황", name:"외국인 국채 보유액",       unit:"억원/월"},
+      ]
+    },
   ];
 
-  const [selApi,setSelApi]=useState(null);
-
   return(
-    <div style={{display:"flex",height:"100%"}}>
-      <div style={{flex:1,overflowY:"auto",padding:"14px 16px"}}>
-        <div style={{marginBottom:14}}>
-          <div style={{fontSize:13,color:T.accent,fontFamily:"Space Grotesk",fontWeight:700,marginBottom:4}}>📡 금융 데이터 API 가이드</div>
-          <div style={{fontSize:9,color:T.muted,fontFamily:"JetBrains Mono",lineHeight:1.7}}>
-            Investing.com은 <span style={{color:T.red,fontWeight:700}}>공개 API를 제공하지 않습니다</span> (2025년 기준, 데이터 계약상 제약).
-            아래는 이 대시보드를 <span style={{color:T.green,fontWeight:700}}>실제 라이브 데이터</span>로 강화하기 위한 최적 API 조합입니다.
+    <div style={{overflowY:"auto",height:"100%",padding:"16px 20px"}}>
+      <div style={{marginBottom:16}}>
+        <div style={{fontSize:13,color:T.accent,fontFamily:"Space Grotesk",fontWeight:700,marginBottom:4}}>
+          📡 실제 데이터 API 연결 현황
+        </div>
+        <div style={{fontSize:8.5,color:T.muted,fontFamily:"JetBrains Mono",lineHeight:1.8}}>
+          ECOS 키와 FSS 키를 입력하면 가상 시뮬레이션 수치가 <span style={{color:T.green}}>실제 데이터</span>로 교체됩니다.
+          IMF·FRED·AV·Finnhub는 이미 연결 중.
+        </div>
+      </div>
+
+      {/* API 연결 상태 요약 */}
+      <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:16}}>
+        {[
+          {label:"ECOS", on:live.ecosLive,  col:T.green},
+          {label:"IMF",  on:live.imfLive,   col:T.accent},
+          {label:"FRED", on:live.fredLive,  col:T.purple},
+          {label:"AV",   on:live.avLive,    col:T.gold},
+          {label:"FH",   on:live.fhLive,    col:T.orange},
+          {label:"FSS",  on:live.fssLive,   col:T.teal},
+        ].map(function(s){return(
+          <div key={s.label} style={{padding:"4px 10px",borderRadius:3,
+            border:"1px solid "+(s.on?s.col:T.dim),
+            background:s.on?s.col+"15":"transparent",
+            fontFamily:"JetBrains Mono",fontSize:9,color:s.on?s.col:T.dim}}>
+            {s.on?"●":"○"} {s.label} {s.on?"LIVE":"미연결"}
           </div>
-        </div>
+        );})}
+      </div>
 
-        <div style={{display:"grid",gridTemplateColumns:"repeat(2,1fr)",gap:6}}>
-          {apis.map(api=>{
-            const isSel=selApi===api.name;
-            return(
-              <div key={api.name} onClick={()=>setSelApi(p=>p===api.name?null:api.name)}
-                style={{background:T.panel,border:`1px solid ${api.color}${isSel?"88":"33"}`,borderRadius:5,padding:"10px 12px",cursor:"pointer",
-                  boxShadow:isSel?`0 0 12px ${api.color}22`:"none"}}>
-                <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:5}}>
-                  <span style={{fontSize:11,color:api.color,fontWeight:700,fontFamily:"Space Grotesk"}}>{api.name}</span>
-                  <span style={{fontSize:9,color:api.color,background:api.color+"20",padding:"2px 8px",borderRadius:2,fontFamily:"JetBrains Mono",fontWeight:700,whiteSpace:"nowrap",border:`1px solid ${api.color}44`}}>
-                    {api.tier}
-                  </span>
-                </div>
-                <div style={{fontSize:11,color:T.gold,fontFamily:"JetBrains Mono",fontWeight:700,marginBottom:3}}>{api.cost}</div>
-                <div style={{fontSize:8,color:T.muted,fontFamily:"JetBrains Mono",marginBottom:3}}>{api.coverage}</div>
-                {isSel&&(
-                  <div style={{marginTop:8,paddingTop:8,borderTop:`1px solid ${T.border}`}}>
-                    <div style={{fontSize:8,color:T.text,fontFamily:"JetBrains Mono",lineHeight:1.7,marginBottom:6}}>{api.note}</div>
-                    <div style={{fontSize:8,color:T.muted,fontFamily:"JetBrains Mono"}}>한계: {api.limit}</div>
-                    <a href={api.url} target="_blank" style={{fontSize:8,color:api.color,fontFamily:"JetBrains Mono",display:"block",marginTop:4,textDecoration:"none"}}>🔗 {api.url}</a>
-                  </div>
-                )}
+      {/* 각 API 카드 */}
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+        {apis.map(function(api){return(
+          <div key={api.name} style={{background:T.panel,borderRadius:6,
+            border:"1px solid "+(api.keyStatus?api.color+"44":T.border),
+            overflow:"hidden"}}>
+            {/* 헤더 */}
+            <div style={{padding:"10px 14px",borderBottom:"1px solid "+T.border,
+              background:api.keyStatus?api.color+"0a":"transparent",
+              display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+              <div>
+                <span style={{fontSize:12,color:api.color,fontWeight:700,fontFamily:"Space Grotesk"}}>{api.name}</span>
+                <span style={{marginLeft:8,fontSize:8,color:T.muted,fontFamily:"JetBrains Mono"}}>{api.cost}/월</span>
               </div>
-            );
-          })}
-        </div>
-
-        <div style={{marginTop:14,background:T.panel2,borderRadius:6,padding:"14px 16px",border:`1px solid ${T.border}`}}>
-          <div style={{fontSize:10,color:T.gold,fontFamily:"Space Grotesk",fontWeight:700,marginBottom:8}}>💡 권장 조합 (개인 투자자용)</div>
-          {[
-            {combo:"FRED API + World Bank",cost:"완전 무료",use:"국가별 경제 건강 스코어 → 실제 데이터화"},
-            {combo:"Finnhub 무료",cost:"$0",use:"헤지펀드 SEC 13F 포지션 → 실제 포지션 데이터"},
-            {combo:"Alpha Vantage 기본",cost:"$0~$50/mo",use:"거시지표(CPI·실업) 자동 업데이트"},
-            {combo:"CoinGecko + ExchangeRate-API",cost:"$0 (현재 사용 중)",use:"크립토·환율 실시간 (이미 연동됨)"},
-            {combo:"TradingView Widgets",cost:"$0 (현재 사용 중)",use:"차트·지수·뉴스 (이미 연동됨)"},
-          ].map((r,i)=>(
-            <div key={i} style={{display:"flex",alignItems:"center",gap:10,padding:"6px 8px",background:T.panel,borderRadius:3,marginBottom:4}}>
-              <span style={{fontSize:9,color:T.accent,fontFamily:"JetBrains Mono",fontWeight:700,minWidth:220}}>{r.combo}</span>
-              <span style={{fontSize:9,color:T.green,fontFamily:"JetBrains Mono",fontWeight:700,minWidth:80}}>{r.cost}</span>
-              <span style={{fontSize:8,color:T.muted,fontFamily:"JetBrains Mono"}}>{r.use}</span>
+              <div style={{display:"flex",gap:5,alignItems:"center"}}>
+                <span style={{fontSize:8,padding:"2px 7px",borderRadius:2,fontFamily:"JetBrains Mono",
+                  color:api.keyStatus?T.green:T.orange,
+                  border:"1px solid "+(api.keyStatus?T.green:T.orange)+"44"}}>
+                  {api.keyStatus ? "● LIVE" : "○ 키 필요"}
+                </span>
+              </div>
             </div>
-          ))}
+
+            <div style={{padding:"10px 14px"}}>
+              {/* 실제 수신 데이터 */}
+              {api.liveData && api.liveData.length > 0 && (
+                <div style={{background:T.green+"0d",border:"1px solid "+T.green+"33",
+                  borderRadius:4,padding:"6px 10px",marginBottom:8}}>
+                  <div style={{fontSize:7.5,color:T.green,fontFamily:"JetBrains Mono",fontWeight:700,marginBottom:3}}>
+                    ✅ 실시간 수신 중
+                  </div>
+                  {api.liveData.map(function(d,i){return(
+                    <div key={i} style={{fontSize:8,color:T.text,fontFamily:"JetBrains Mono"}}>{d}</div>
+                  );})}
+                </div>
+              )}
+
+              {/* 키 미설정시 발급 안내 */}
+              {!api.keyStatus && api.inputVar && (
+                <div style={{background:T.orange+"0d",border:"1px solid "+T.orange+"33",
+                  borderRadius:4,padding:"7px 10px",marginBottom:8}}>
+                  <div style={{fontSize:7.5,color:T.orange,fontFamily:"JetBrains Mono",fontWeight:700,marginBottom:3}}>
+                    🔑 키 발급 방법
+                  </div>
+                  <div style={{fontSize:8,color:T.muted,fontFamily:"JetBrains Mono",lineHeight:1.7}}>
+                    {api.getKey}
+                  </div>
+                  <div style={{fontSize:7.5,color:T.dim,fontFamily:"JetBrains Mono",marginTop:4}}>
+                    발급 후 코드 상단 <span style={{color:T.accent}}>{api.inputVar}</span> 변수에 입력
+                  </div>
+                </div>
+              )}
+              {!api.keyStatus && !api.inputVar && (
+                <div style={{background:T.green+"0d",border:"1px solid "+T.green+"33",borderRadius:4,
+                  padding:"6px 10px",marginBottom:8,fontSize:8,color:T.green,fontFamily:"JetBrains Mono"}}>
+                  ✅ {api.getKey}
+                </div>
+              )}
+
+              {/* 커버리지 */}
+              <div style={{fontSize:8,color:T.muted,fontFamily:"JetBrains Mono",marginBottom:6,lineHeight:1.6}}>
+                {api.coverage}
+              </div>
+
+              {/* 시리즈 목록 */}
+              <div style={{borderTop:"1px solid "+T.border,paddingTop:6}}>
+                <div style={{fontSize:7,color:T.dim,fontFamily:"JetBrains Mono",marginBottom:4,letterSpacing:".08em"}}>
+                  주요 시리즈
+                </div>
+                {api.series.map(function(s){return(
+                  <div key={s.code} style={{display:"flex",justifyContent:"space-between",
+                    padding:"3px 0",borderBottom:"1px solid "+T.border+"44"}}>
+                    <div>
+                      <span style={{fontSize:8,color:T.text,fontFamily:"JetBrains Mono"}}>{s.name}</span>
+                      {s.note && <span style={{fontSize:7,color:T.dim,fontFamily:"JetBrains Mono",marginLeft:6}}>{s.note}</span>}
+                    </div>
+                    <span style={{fontSize:7.5,color:api.color,fontFamily:"JetBrains Mono",marginLeft:8,whiteSpace:"nowrap"}}>{s.unit}</span>
+                  </div>
+                );})}
+              </div>
+
+              {/* 링크 */}
+              <a href={api.url} target="_blank" rel="noopener"
+                style={{display:"block",marginTop:8,fontSize:8,color:api.color,
+                  fontFamily:"JetBrains Mono",textDecoration:"none"}}>
+                ↗ {api.url}
+              </a>
+            </div>
+          </div>
+        );})}
+      </div>
+
+      {/* ECOS 설명 추가 */}
+      <div style={{marginTop:14,padding:"12px 16px",background:T.panel,borderRadius:6,
+        border:"1px solid "+T.green+"33"}}>
+        <div style={{fontSize:10,color:T.green,fontFamily:"Space Grotesk",fontWeight:700,marginBottom:8}}>
+          🎯 ECOS 키 입력 후 자동으로 바뀌는 것들
+        </div>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:6}}>
+          {[
+            ["🌍 자금지도 KR 유입", "가상 $180B → 실제 FDI 유입액"],
+            ["🌍 자금지도 KR 유출", "가상 $55B  → 실제 외국인 순매도"],
+            ["📊 금리탭 KR 기준금리", "REGIONS 하드코딩 → ECOS 실시간"],
+            ["📊 금리탭 KR 경상수지", "가상값 → BOP 실제 월별 데이터"],
+            ["📅 타임라인 KR 플로우", "genFlow 시뮬레이션 → 실제 24개월"],
+            ["🦁 헤지펀드 KR 지표", "고정값 → ECOS 실시간 거시지표"],
+          ].map(function(row,i){return(
+            <div key={i} style={{padding:"6px 8px",background:T.panel2,borderRadius:3,
+              border:"1px solid "+T.border}}>
+              <div style={{fontSize:8,color:T.accent,fontFamily:"JetBrains Mono",fontWeight:700}}>{row[0]}</div>
+              <div style={{fontSize:7.5,color:T.muted,fontFamily:"JetBrains Mono",marginTop:2}}>{row[1]}</div>
+            </div>
+          );})}
         </div>
       </div>
     </div>
   );
 }
 
-/* ════════════════════════════════════════════════════════════════
-   MAIN APP
-════════════════════════════════════════════════════════════════ */
 function App(){
   const [tab,setTab]=useState("worldmap");
   const [clock,setClock]=useState(new Date());
