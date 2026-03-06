@@ -62,7 +62,7 @@ var FRED_KEY = 'b265c038167e9fa6fc34678a62c9c2a4';
 var AV_KEY   = 'E4707A6I8NXZOF6K';
 var FH_KEY   = 'd6hg6m9r01qr5k4breqgd6hg6m9r01qr5k4brer0';
 var ECOS_KEY = 'ZV9F4SG308AAQ8GMQR35';  // 한국은행 ECOS API
-var FSS_KEY  = '';  // ← 금융감독원 키 (data.fss.or.kr 발급)
+var FSS_KEY  = '0d953c04697cc4a0da0de7d301623d1c';  // 금융감독원 FSS API
 
 function fredFetch(series) {
   return fetch('https://api.stlouisfed.org/fred/series/observations?series_id=' + series +
@@ -288,18 +288,66 @@ function loadEcos() {
 ══════════════════════════════════════════════════════════ */
 function loadFss() {
   if (!FSS_KEY) {
-    console.log('[FSS] 키 미설정 — data.fss.or.kr에서 발급');
+    console.log('[FSS] 키 미설정');
     return;
   }
-  // 외국인 주식 보유 현황
-  var url = 'https://apis.data.go.kr/1160100/service/GetStockSecuritiesInfoService/getStockPriceInfo'
-    + '?serviceKey=' + FSS_KEY + '&numOfRows=12&pageNo=1&resultType=json';
+
+  // FSS 외국인 국내 투자동향 API
+  // https://www.fss.or.kr/fss/kr/openApi/api/invtTrend.jsp
+  var now   = new Date();
+  var end   = now.toISOString().slice(0,10).replace(/-/g,'');
+  var start = new Date(now.getFullYear(), now.getMonth()-6, 1)
+                .toISOString().slice(0,10).replace(/-/g,'');
+
+  var url = 'https://www.fss.or.kr/fss/kr/openApi/api/invtTrend.jsp'
+    + '?apiType=json'
+    + '&startDate=' + start
+    + '&endDate='   + end
+    + '&authKey='   + FSS_KEY;
+
   fetch(url)
     .then(function(r) { return r.json(); })
     .then(function(d) {
-      window.__live.fssLive = true;
-      console.log('[FSS] loaded');
-    }).catch(function(e) { console.warn('FSS error', e); });
+      // FSS 응답 구조: { invtTrend: { item: [...] } }
+      var items = (d.invtTrend && d.invtTrend.item) ? d.invtTrend.item : [];
+      if (!Array.isArray(items)) items = [items];
+
+      // 월별 집계 (일별 → 월별 합산)
+      var monthly = {};
+      items.forEach(function(row) {
+        if (!row || !row.trdDd) return;
+        var ym = String(row.trdDd).slice(0, 6); // YYYYMM
+        if (!monthly[ym]) monthly[ym] = { stockBuy:0, stockSell:0, bondBuy:0, bondSell:0, count:0 };
+        monthly[ym].stockBuy  += parseFloat(row.stckNetBuyAmt  || row.netBuyAmt  || 0);
+        monthly[ym].stockSell += parseFloat(row.stckNetSellAmt || 0);
+        monthly[ym].bondBuy   += parseFloat(row.bondNetBuyAmt  || 0);
+        monthly[ym].count++;
+      });
+
+      // 배열로 변환 (최신순)
+      var monthArr = Object.keys(monthly).sort().map(function(ym) {
+        var m = monthly[ym];
+        return {
+          date:      ym,
+          stockNet:  +(m.stockBuy / 100000000).toFixed(1),  // 원 → 억원
+          bondNet:   +(m.bondBuy  / 100000000).toFixed(1),
+          totalNet:  +((m.stockBuy + m.bondBuy) / 100000000).toFixed(1),
+        };
+      });
+
+      window.__live.fss.foreignStock = monthArr;
+      window.__live.fss.rawItems     = items.slice(0, 30);  // 최근 30일 원본
+      window.__live.fssLive  = monthArr.length > 0 || items.length > 0;
+      window.__live.lastUpdated = new Date();
+
+      console.log('[FSS] 외국인투자동향:', monthArr.length, '개월,', items.length, '건');
+      console.log('[FSS] 최신 월:', monthArr.slice(-1));
+    })
+    .catch(function(e) {
+      // CORS 제한시 대체: 직접 접근 불가 알림만
+      console.warn('[FSS] fetch 실패 (CORS 가능):', e.message);
+      window.__live.fss.corsBlocked = true;
+    });
 }
 
 /* ══════════════════════════════════════════════════════════
@@ -2058,6 +2106,300 @@ function HedgeFundView(){
 /* ════════════════════════════════════════════════════════════════
    TAB 5: MARKETS — 라이브 시장 데이터
 ════════════════════════════════════════════════════════════════ */
+/* ══════════════════════════════════════════════════════════
+   YIELD CURVE PANEL — 통합 수익률 곡선 인터랙티브 차트
+══════════════════════════════════════════════════════════ */
+function YieldCurvePanel({regionsLive, live, fred}) {
+  var DURATIONS = ["1M","3M","6M","1Y","2Y","5Y","10Y","30Y"];
+  var [hovId, setHovId]   = useState(null);   // 호버된 국가 id
+  var [hovDur, setHovDur] = useState(null);   // 호버된 duration index
+  var [tooltip, setTooltip] = useState(null); // {x,y,r,dur}
+
+  var CW = 620, CH = 260;
+  var PL = 46, PR = 16, PT = 18, PB = 36;
+  var gW = CW - PL - PR;
+  var gH = CH - PT - PB;
+
+  // 실제 yields 반영 (US는 FRED 우선)
+  var regions = regionsLive.map(function(r) {
+    if (r.id === "us" && live.fredLive && fred.yields && fred.yields.some(function(v){return v>0;})) {
+      return Object.assign({}, r, {yields: fred.yields});
+    }
+    return r;
+  }).filter(function(r){ return r.yields && r.yields.filter(function(v){return v>0;}).length > 2; });
+
+  // 전체 Y축 범위
+  var allVals = [];
+  regions.forEach(function(r){ r.yields.forEach(function(v){ if(v>0) allVals.push(v); }); });
+  var yMin = allVals.length ? Math.floor((Math.min.apply(null,allVals) - 0.3) * 2) / 2 : 0;
+  var yMax = allVals.length ? Math.ceil((Math.max.apply(null,allVals)  + 0.3) * 2) / 2 : 8;
+  var yRange = yMax - yMin || 1;
+
+  function xOf(i)  { return PL + (i / (DURATIONS.length - 1)) * gW; }
+  function yOf(v)  { return PT + (1 - (v - yMin) / yRange) * gH; }
+
+  function getPath(ylds) {
+    return ylds.map(function(v,i){
+      return (i===0?"M":"L") + xOf(i).toFixed(1) + " " + yOf(v).toFixed(1);
+    }).join(" ");
+  }
+
+  // Y축 틱
+  var yTicks = [];
+  for (var y = Math.ceil(yMin*2)/2; y <= yMax; y = Math.round((y+0.5)*100)/100) {
+    yTicks.push(y);
+  }
+
+  // 세로 가이드선 x 위치
+  var xGuides = DURATIONS.map(function(_,i){ return xOf(i); });
+
+  function handleSvgMove(e) {
+    var rect = e.currentTarget.getBoundingClientRect();
+    var mx = e.clientX - rect.left;
+    // 가장 가까운 duration 찾기
+    var best = 0, bestDist = 9999;
+    xGuides.forEach(function(xg, i) {
+      var d = Math.abs(mx - xg);
+      if (d < bestDist) { bestDist = d; best = i; }
+    });
+    setHovDur(best);
+  }
+
+  function handleSvgLeave() {
+    setHovDur(null);
+    if (!hovId) setTooltip(null);
+  }
+
+  return (
+    <div style={{display:"flex",flexDirection:"column",height:"100%",overflow:"hidden"}}>
+
+      {/* ── 범례 + 기준금리 배지 ── */}
+      <div style={{flexShrink:0, padding:"8px 14px", display:"flex", gap:6, flexWrap:"wrap", alignItems:"center", borderBottom:"1px solid "+T.border}}>
+        <span style={{fontSize:7.5,color:T.dim,fontFamily:"JetBrains Mono",marginRight:4}}>수익률 곡선</span>
+        {regions.map(function(r){
+          var inv = r.yields[6] < r.yields[4];
+          var isHov = hovId === r.id;
+          return (
+            <div key={r.id}
+              onMouseEnter={function(){setHovId(r.id);}}
+              onMouseLeave={function(){setHovId(null);}}
+              style={{display:"flex",alignItems:"center",gap:5,padding:"3px 8px",borderRadius:3,cursor:"pointer",
+                background: isHov ? r.color+"22" : "transparent",
+                border:"1px solid "+(isHov ? r.color : r.color+"44"),
+                transition:"all .15s"}}>
+              <span style={{fontSize:12,lineHeight:1}}>{r.flag}</span>
+              <span style={{fontSize:8.5,color:isHov?r.color:T.muted,fontFamily:"JetBrains Mono",fontWeight:isHov?700:400}}>{r.name}</span>
+              <span style={{fontSize:8,color:r.color,fontFamily:"JetBrains Mono",fontWeight:700}}>{r.policyRate}%</span>
+              {inv && <span style={{fontSize:6.5,color:T.red,fontFamily:"JetBrains Mono"}}>⚠역전</span>}
+              {r.id==="us"&&live.fredLive&&<span style={{fontSize:6,color:T.green,fontFamily:"JetBrains Mono"}}>LIVE</span>}
+            </div>
+          );
+        })}
+      </div>
+
+      {/* ── SVG 차트 ── */}
+      <div style={{flex:"0 0 auto", padding:"6px 14px 0", position:"relative"}}>
+        <svg width={CW} height={CH} style={{display:"block",maxWidth:"100%"}}
+          onMouseMove={handleSvgMove}
+          onMouseLeave={handleSvgLeave}>
+
+          {/* Y축 가이드라인 + 레이블 */}
+          {yTicks.map(function(y,i){
+            var yp = yOf(y);
+            return (
+              <g key={i}>
+                <line x1={PL} y1={yp} x2={CW-PR} y2={yp}
+                  stroke={T.border} strokeWidth="0.5" strokeDasharray="3,3"/>
+                <text x={PL-5} y={yp+3.5} textAnchor="end"
+                  fill={T.dim} fontSize="8" fontFamily="JetBrains Mono">{y.toFixed(1)}</text>
+              </g>
+            );
+          })}
+
+          {/* X축 가이드라인 + duration 레이블 */}
+          {DURATIONS.map(function(d,i){
+            var xp = xOf(i);
+            var isHovDur = hovDur === i;
+            return (
+              <g key={i}>
+                <line x1={xp} y1={PT} x2={xp} y2={PT+gH}
+                  stroke={isHovDur ? T.accent+"88" : T.border}
+                  strokeWidth={isHovDur ? 1 : 0.5}/>
+                <text x={xp} y={CH-4} textAnchor="middle"
+                  fill={isHovDur?T.accent:T.dim} fontSize="8.5" fontFamily="JetBrains Mono"
+                  fontWeight={isHovDur?"700":"400"}>{d}</text>
+              </g>
+            );
+          })}
+
+          {/* 수익률 곡선 라인 */}
+          {regions.map(function(r){
+            var isHov = hovId === r.id;
+            var isFade = hovId !== null && !isHov;
+            var inv = r.yields[6] < r.yields[4];
+            var stroke = inv ? T.red : r.color;
+            var d = getPath(r.yields);
+            return (
+              <g key={r.id}
+                onMouseEnter={function(){setHovId(r.id);}}
+                onMouseLeave={function(){setHovId(null);}}
+                style={{cursor:"pointer"}}>
+                {/* 호버 영역 넓히기용 투명 라인 */}
+                <path d={d} fill="none" stroke="transparent" strokeWidth="12"/>
+                {/* 실제 라인 */}
+                <path d={d} fill="none"
+                  stroke={stroke}
+                  strokeWidth={isHov ? 2.5 : 1.5}
+                  strokeLinejoin="round"
+                  strokeLinecap="round"
+                  opacity={isFade ? 0.15 : isHov ? 1 : 0.7}
+                  style={{transition:"opacity .15s, stroke-width .1s"}}/>
+                {/* 데이터 포인트 */}
+                {r.yields.map(function(v,i){
+                  var cx = xOf(i), cy = yOf(v);
+                  var isDurHov = hovDur === i;
+                  return (
+                    <circle key={i} cx={cx} cy={cy}
+                      r={isHov ? (isDurHov?5:3.5) : isDurHov?2.5:2}
+                      fill={stroke}
+                      opacity={isFade ? 0.1 : isHov ? 1 : isDurHov ? 0.9 : 0.6}
+                      style={{transition:"r .1s, opacity .15s"}}/>
+                  );
+                })}
+                {/* 호버시 국가명 라인 끝에 표시 */}
+                {isHov && (
+                  <text
+                    x={xOf(DURATIONS.length-1)+5}
+                    y={yOf(r.yields[DURATIONS.length-1])+4}
+                    fill={stroke} fontSize="8.5" fontFamily="JetBrains Mono" fontWeight="700">
+                    {r.flag}{r.name}
+                  </text>
+                )}
+              </g>
+            );
+          })}
+
+          {/* duration 호버시 각 국가 값 표시 */}
+          {hovDur !== null && regions.map(function(r){
+            var v = r.yields[hovDur];
+            if (!v || v <= 0) return null;
+            var isHov = hovId === r.id || hovId === null;
+            var xp = xOf(hovDur);
+            var yp = yOf(v);
+            var inv = r.yields[6] < r.yields[4];
+            return (
+              <g key={r.id} opacity={isHov ? 1 : 0.2}>
+                <rect x={xp+5} y={yp-9} width={38} height={13} rx="2"
+                  fill={T.panel} stroke={inv?T.red:r.color} strokeWidth="0.8" opacity="0.95"/>
+                <text x={xp+24} y={yp+1.5} textAnchor="middle"
+                  fill={inv?T.red:r.color} fontSize="8" fontFamily="JetBrains Mono" fontWeight="700">
+                  {v.toFixed(2)}%
+                </text>
+              </g>
+            );
+          })}
+
+          {/* Y축 테두리 */}
+          <line x1={PL} y1={PT} x2={PL} y2={PT+gH} stroke={T.border} strokeWidth="1"/>
+          <line x1={PL} y1={PT+gH} x2={CW-PR} y2={PT+gH} stroke={T.border} strokeWidth="1"/>
+        </svg>
+      </div>
+
+      {/* ── Duration 별 수치 테이블 ── */}
+      <div style={{flex:1, overflowY:"auto", padding:"0 14px 12px"}}>
+        <table style={{width:"100%", borderCollapse:"collapse", fontFamily:"JetBrains Mono", fontSize:8.5}}>
+          <thead>
+            <tr style={{borderBottom:"1px solid "+T.border}}>
+              <th style={{padding:"5px 8px", textAlign:"left", color:T.muted, fontWeight:700, fontSize:7.5, whiteSpace:"nowrap"}}>국가</th>
+              <th style={{padding:"5px 6px", textAlign:"center", color:T.accent, fontWeight:700, fontSize:7.5}}>기준금리</th>
+              {DURATIONS.map(function(d,i){
+                return (
+                  <th key={d}
+                    onMouseEnter={function(){setHovDur(i);}}
+                    onMouseLeave={function(){setHovDur(null);}}
+                    style={{padding:"5px 6px", textAlign:"center", cursor:"pointer",
+                      color: hovDur===i ? T.accent : T.muted,
+                      fontWeight: hovDur===i ? 700 : 400,
+                      fontSize:7.5, background: hovDur===i ? T.accent+"0d":"transparent",
+                      transition:"all .1s"}}>
+                    {d}
+                  </th>
+                );
+              })}
+              <th style={{padding:"5px 6px", textAlign:"center", color:T.muted, fontWeight:700, fontSize:7.5}}>스프레드<br/>2Y↔10Y</th>
+            </tr>
+          </thead>
+          <tbody>
+            {regions.map(function(r, ri){
+              var inv = r.yields[6] < r.yields[4];  // 10Y < 2Y
+              var spread = r.yields[6] && r.yields[4] ? +(r.yields[6]-r.yields[4]).toFixed(2) : null;
+              var isHov = hovId === r.id;
+              return (
+                <tr key={r.id}
+                  onMouseEnter={function(){setHovId(r.id);}}
+                  onMouseLeave={function(){setHovId(null);}}
+                  style={{
+                    background: isHov ? r.color+"12" : ri%2===0 ? "transparent" : T.panel+"88",
+                    borderBottom:"1px solid "+T.border+"55",
+                    cursor:"pointer",
+                    transition:"background .12s"}}>
+                  {/* 국가명 */}
+                  <td style={{padding:"6px 8px", whiteSpace:"nowrap"}}>
+                    <div style={{display:"flex",alignItems:"center",gap:5}}>
+                      <span style={{fontSize:13}}>{r.flag}</span>
+                      <div>
+                        <div style={{color: isHov?r.color:T.text, fontWeight:isHov?700:400}}>{r.name}</div>
+                        <div style={{fontSize:7, color:T.dim}}>{r.cbName}</div>
+                      </div>
+                      {r.id==="us"&&live.fredLive&&(
+                        <span style={{fontSize:6,color:T.green,fontFamily:"JetBrains Mono",
+                          padding:"1px 4px",border:"1px solid "+T.green+"44",borderRadius:2}}>LIVE</span>
+                      )}
+                    </div>
+                  </td>
+                  {/* 기준금리 */}
+                  <td style={{padding:"6px 6px", textAlign:"center"}}>
+                    <div style={{fontSize:11, fontWeight:700, color:r.color,
+                      background:r.color+"1a", borderRadius:3, padding:"2px 5px", display:"inline-block"}}>
+                      {r.policyRate}%
+                    </div>
+                  </td>
+                  {/* duration 별 수익률 */}
+                  {r.yields.map(function(v,i){
+                    var isDurHov = hovDur === i;
+                    var color = inv ? T.red : (v > r.policyRate+1.5 ? T.green : v < r.policyRate-0.5 ? T.orange : T.text);
+                    return (
+                      <td key={i} style={{padding:"6px 4px", textAlign:"center",
+                        background: isDurHov ? T.accent+"0d" : "transparent",
+                        transition:"background .1s"}}>
+                        <span style={{color: isDurHov ? T.accent : color,
+                          fontWeight: isDurHov ? 700 : 400}}>
+                          {v > 0 ? v.toFixed(2) : "—"}
+                        </span>
+                      </td>
+                    );
+                  })}
+                  {/* 스프레드 */}
+                  <td style={{padding:"6px 6px", textAlign:"center"}}>
+                    {spread !== null ? (
+                      <span style={{color: spread < 0 ? T.red : spread < 0.3 ? T.orange : T.green,
+                        fontWeight:700}}>
+                        {spread > 0 ? "+" : ""}{spread}%p
+                        {inv && <span style={{display:"block",fontSize:6.5,color:T.red}}>⚠역전</span>}
+                      </span>
+                    ) : "—"}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+
 function MarketsView(){
   var [tab,setTab]=useState("indices");
   var [cryptoData,setCryptoData]=useState([
@@ -2145,7 +2487,7 @@ function MarketsView(){
     <div style={{display:"flex",flexDirection:"column",height:"100%"}}>
       {/* 탭 + 상태 */}
       <div style={{padding:"6px 14px",background:T.panel2,borderBottom:"1px solid "+T.border,display:"flex",gap:4,alignItems:"center",flexWrap:"wrap"}}>
-        {[["indices","주요지수"],["fx","환율"],["crypto","크립토"],["commodities","원자재"],["rates","금리"],["news","뉴스·캘린더"],["calendar","경제캘린더"]].map(function(pair){
+        {[["indices","주요지수"],["fx","환율"],["crypto","크립토"],["commodities","원자재"],["rates","금리"],["foreign","외국인투자"],["news","뉴스·캘린더"],["calendar","경제캘린더"]].map(function(pair){
           var id=pair[0],lbl=pair[1];
           return(<button key={id} className={"btn"+(tab===id?" a":"")} onClick={function(){setTab(id);}}>{ lbl}</button>);
         })}
@@ -2155,6 +2497,7 @@ function MarketsView(){
           <Dot on={live.avLive}   label="AV"   col={T.gold}/>
           <Dot on={live.fhLive}   label="FH"   col={T.purple}/>
           <Dot on={fxLive}        label="FX"   col={T.accent}/>
+          <Dot on={live.fssLive}  label="FSS"  col={T.teal}/>
         </div>
       </div>
 
@@ -2234,66 +2577,37 @@ function MarketsView(){
 
         {/* 금리 — FRED LIVE */}
         {tab==="rates"&&(
-          <div style={{padding:"12px 14px",overflowY:"auto"}}>
-            {live.fredLive&&(
-              <div style={{background:T.panel,border:"1px solid "+T.green+"44",borderRadius:6,padding:"12px 14px",marginBottom:14}}>
-                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
-                  <span style={{fontSize:10,color:T.green,fontFamily:"JetBrains Mono",fontWeight:700}}>🏛 FRED 실시간 · 미국 주요 거시지표</span>
-                  <span style={{fontSize:7,color:T.muted,fontFamily:"JetBrains Mono"}}>{live.lastUpdated&&live.lastUpdated.toLocaleTimeString("ko-KR",{hour12:false})}</span>
+          <div style={{display:"flex",flexDirection:"column",height:"100%",overflow:"hidden"}}>
+
+            {/* ── 상단: FRED 거시지표 배지 ── */}
+            <div style={{flexShrink:0,padding:"8px 14px",borderBottom:"1px solid "+T.border,
+              background:T.panel2,display:"flex",gap:6,alignItems:"center",flexWrap:"wrap"}}>
+              {[
+                {l:"기준금리(US)",v:fred.fedRate,      u:"%",c:T.accent},
+                {l:"실업률",      v:fred.unemployment, u:"%",c:fred.unemployment&&fred.unemployment<4?T.green:T.orange},
+                {l:"CPI YoY",    v:fred.cpi,          u:"%",c:fred.cpi&&fred.cpi<3?T.green:fred.cpi&&fred.cpi<4?T.orange:T.red},
+                {l:"GDP 성장",   v:fred.gdpGrowth,    u:"%",c:fred.gdpGrowth&&fred.gdpGrowth>2?T.green:T.gold},
+                {l:"US 2Y",      v:fred.rate2y,       u:"%",c:T.gold},
+                {l:"US 10Y",     v:fred.rate10y,      u:"%",c:T.gold},
+                {l:"스프레드",   v:fred.rate10y!=null&&fred.rate2y!=null?+(fred.rate10y-fred.rate2y).toFixed(2):null,
+                  u:"%p",c:fred.rate10y!=null&&fred.rate2y!=null&&fred.rate10y-fred.rate2y<0?T.red:T.green},
+                {l:"US 30Y",     v:fred.rate30y,      u:"%",c:T.muted},
+              ].map(function(item,i){return(
+                <div key={i} style={{display:"flex",flexDirection:"column",alignItems:"center",
+                  padding:"4px 10px",background:T.panel,borderRadius:4,border:"1px solid "+item.c+"33",minWidth:68}}>
+                  <div style={{fontSize:7,color:T.dim,fontFamily:"JetBrains Mono",marginBottom:1,whiteSpace:"nowrap"}}>{item.l}</div>
+                  <div style={{fontSize:13,fontWeight:700,color:item.c,fontFamily:"JetBrains Mono"}}>{item.v!=null?item.v+item.u:"—"}</div>
+                  {live.fredLive&&<div style={{fontSize:6,color:T.green,fontFamily:"JetBrains Mono"}}>● LIVE</div>}
                 </div>
-                <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:8}}>
-                  {[
-                    {l:"기준금리",v:fred.fedRate,u:"%",c:T.accent},
-                    {l:"실업률",  v:fred.unemployment,u:"%",c:fred.unemployment<4?T.green:T.orange},
-                    {l:"CPI YoY",v:fred.cpi,u:"%",c:fred.cpi<3?T.green:fred.cpi<4?T.orange:T.red},
-                    {l:"GDP성장", v:fred.gdpGrowth,u:"%",c:fred.gdpGrowth>2?T.green:fred.gdpGrowth>0?T.gold:T.red},
-                    {l:"2Y 국채",v:fred.rate2y,u:"%",c:T.gold},
-                    {l:"10Y 국채",v:fred.rate10y,u:"%",c:T.gold},
-                    {l:"2Y-10Y", v:fred.rate10y!=null&&fred.rate2y!=null?+(fred.rate10y-fred.rate2y).toFixed(2):null,u:"%p",c:fred.rate10y-fred.rate2y<0?T.red:T.green},
-                    {l:"30Y 국채",v:fred.rate30y,u:"%",c:T.muted},
-                  ].map(function(item,i){return(
-                    <div key={i} style={{background:T.panel2,borderRadius:4,padding:"9px 11px",border:"1px solid "+item.c+"22"}}>
-                      <div style={{fontSize:7.5,color:T.muted,fontFamily:"JetBrains Mono",marginBottom:4}}>{item.l}</div>
-                      <div style={{fontSize:16,fontWeight:700,color:item.c,fontFamily:"JetBrains Mono"}}>{item.v!=null?item.v+item.u:"—"}</div>
-                    </div>
-                  );})}
-                </div>
+              );})}
+              <div style={{marginLeft:"auto",fontSize:7,color:T.dim,fontFamily:"JetBrains Mono"}}>
+                {live.lastUpdated&&("FRED "+live.lastUpdated.toLocaleTimeString("ko-KR",{hour12:false}))}
               </div>
-            )}
-            <div style={{display:"grid",gridTemplateColumns:"repeat(2,1fr)",gap:8}}>
-              {regionsLive.map(function(r){
-                var isUsLive=r.id==="us"&&live.fredLive;
-                var ylds=r.yields||[];
-                var valid=ylds.filter(function(v){return v>0;});
-                if(valid.length<2)return null;
-                var mn=Math.min.apply(null,valid)-.1,mx=Math.max.apply(null,valid)+.1,rng=mx-mn||1;
-                var W=180,H=50;
-                var pts=ylds.map(function(v,i){return(i/(ylds.length-1))*W+","+(H-((v-mn)/rng)*(H-8)-4);}).join(" ");
-                var inv=ylds[4]<ylds[2];
-                return(
-                  <div key={r.id} style={{background:T.panel,borderRadius:5,padding:"10px 12px",border:"1px solid "+r.color+"33"}}>
-                    <div style={{display:"flex",justifyContent:"space-between",marginBottom:8,alignItems:"center"}}>
-                      <div style={{display:"flex",alignItems:"center",gap:6}}>
-                        <span style={{fontSize:14}}>{r.flag}</span>
-                        <span style={{fontSize:11,color:r.color,fontWeight:700,fontFamily:"Space Grotesk"}}>{r.name}</span>
-                        {isUsLive&&<span style={{fontSize:7,color:T.green,padding:"1px 5px",borderRadius:2,fontFamily:"JetBrains Mono"}}>● FRED</span>}
-                      </div>
-                      <div style={{textAlign:"right"}}>
-                        <div style={{fontSize:8,color:T.muted,fontFamily:"JetBrains Mono"}}>기준금리</div>
-                        <div style={{fontSize:13,color:r.color,fontWeight:700,fontFamily:"JetBrains Mono"}}>{r.policyRate}%</div>
-                      </div>
-                    </div>
-                    <svg width={W} height={H} style={{display:"block",marginBottom:4}}>
-                      <polyline points={pts} fill="none" stroke={inv?T.red:r.color} strokeWidth="1.5" strokeLinejoin="round"/>
-                      {ylds.map(function(v,i){var x=(i/(ylds.length-1))*W,y=H-((v-mn)/rng)*(H-8)-4;return<circle key={i} cx={x} cy={y} r="2.5" fill={inv?T.red:r.color}/>;  })}
-                    </svg>
-                    <div style={{display:"flex",justifyContent:"space-between",marginBottom:3}}>
-                      {["1M","3M","6M","1Y","2Y","5Y","10Y","30Y"].map(function(t){return<span key={t} style={{fontSize:6.5,color:T.dim,fontFamily:"JetBrains Mono"}}>{t}</span>;})}
-                    </div>
-                    <div style={{fontSize:8,color:inv?T.red:T.green,fontFamily:"JetBrains Mono",fontWeight:700}}>{inv?"⚠️ 역전":"✅ 정상"} · 10Y: {r.rate10y}%</div>
-                  </div>
-                );
-              })}
+            </div>
+
+            {/* ── 통합 수익률 곡선 ── */}
+            <div style={{flex:1,overflow:"hidden"}}>
+              <YieldCurvePanel regionsLive={regionsLive} live={live} fred={fred}/>
             </div>
           </div>
         )}
@@ -2343,6 +2657,168 @@ function MarketsView(){
                   </div>
                 );
               })}
+            </div>
+          </div>
+        )}
+
+        {tab==="foreign"&&(
+          <div style={{display:"flex",flexDirection:"column",height:"100%",overflow:"hidden"}}>
+            {/* 헤더 */}
+            <div style={{flexShrink:0,padding:"8px 14px",borderBottom:"1px solid "+T.border,
+              background:T.panel2,display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+              <div style={{display:"flex",alignItems:"center",gap:8}}>
+                <span style={{fontSize:10,color:T.teal,fontFamily:"Space Grotesk",fontWeight:700}}>🏢 외국인 국내 투자동향</span>
+                <span style={{fontSize:7.5,color:T.muted,fontFamily:"JetBrains Mono"}}>금융감독원 FSS</span>
+                {live.fssLive
+                  ?<span style={{fontSize:7.5,color:T.green,fontFamily:"JetBrains Mono",
+                    padding:"2px 6px",border:"1px solid "+T.green+"44",borderRadius:2}}>● LIVE</span>
+                  :<span style={{fontSize:7.5,color:T.orange,fontFamily:"JetBrains Mono",
+                    padding:"2px 6px",border:"1px solid "+T.orange+"44",borderRadius:2}}>
+                    {live.fss&&live.fss.corsBlocked?"⚠ CORS 제한":"○ 로딩중..."}
+                  </span>}
+              </div>
+              {live.lastUpdated&&<span style={{fontSize:7,color:T.dim,fontFamily:"JetBrains Mono"}}>
+                {live.lastUpdated.toLocaleTimeString("ko-KR",{hour12:false})}
+              </span>}
+            </div>
+
+            <div style={{flex:1,overflowY:"auto",padding:"12px 14px"}}>
+              {/* CORS 제한 안내 */}
+              {live.fss&&live.fss.corsBlocked&&(
+                <div style={{background:T.orange+"0d",border:"1px solid "+T.orange+"33",
+                  borderRadius:6,padding:"12px 14px",marginBottom:12}}>
+                  <div style={{fontSize:9,color:T.orange,fontFamily:"JetBrains Mono",fontWeight:700,marginBottom:4}}>
+                    ⚠ FSS API CORS 제한
+                  </div>
+                  <div style={{fontSize:8,color:T.muted,fontFamily:"JetBrains Mono",lineHeight:1.7}}>
+                    금융감독원 API가 브라우저 직접 호출을 제한하고 있습니다.<br/>
+                    아래 직접 링크에서 데이터를 확인하거나, 서버 프록시를 통해 우회할 수 있습니다.<br/>
+                    <a href="https://www.fss.or.kr/fss/kr/openApi/detail/openApi5.jsp"
+                      target="_blank" rel="noopener"
+                      style={{color:T.accent,textDecoration:"none",marginTop:4,display:"inline-block"}}>
+                      ↗ FSS 외국인 투자동향 API 문서
+                    </a>
+                  </div>
+                </div>
+              )}
+
+              {/* 실제 데이터 있을 때 */}
+              {live.fssLive&&live.fss&&live.fss.foreignStock&&live.fss.foreignStock.length>0&&(
+                <div>
+                  {/* 최신 월 요약 카드 */}
+                  <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8,marginBottom:14}}>
+                    {[
+                      {l:"주식 순매수",
+                       v:live.fss.foreignStock[live.fss.foreignStock.length-1]&&live.fss.foreignStock[live.fss.foreignStock.length-1].stockNet,
+                       u:"억원",c:T.accent},
+                      {l:"채권 순매수",
+                       v:live.fss.foreignStock[live.fss.foreignStock.length-1]&&live.fss.foreignStock[live.fss.foreignStock.length-1].bondNet,
+                       u:"억원",c:T.teal},
+                      {l:"합계 순매수",
+                       v:live.fss.foreignStock[live.fss.foreignStock.length-1]&&live.fss.foreignStock[live.fss.foreignStock.length-1].totalNet,
+                       u:"억원",c:T.green},
+                    ].map(function(item,i){
+                      var isPos=item.v!=null&&item.v>=0;
+                      return(
+                        <div key={i} style={{background:T.panel,border:"1px solid "+item.c+"33",
+                          borderRadius:6,padding:"12px 14px"}}>
+                          <div style={{fontSize:8,color:T.muted,fontFamily:"JetBrains Mono",marginBottom:5}}>{item.l}</div>
+                          <div style={{fontSize:20,fontWeight:700,color:item.v!=null?(isPos?item.c:T.red):T.dim,
+                            fontFamily:"JetBrains Mono"}}>
+                            {item.v!=null?(isPos?"+":"")+item.v+item.u:"—"}
+                          </div>
+                          <div style={{fontSize:7,color:T.dim,fontFamily:"JetBrains Mono",marginTop:3}}>
+                            {live.fss.foreignStock[live.fss.foreignStock.length-1]&&live.fss.foreignStock[live.fss.foreignStock.length-1].date}월
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  {/* 월별 추이 미니 바차트 */}
+                  <div style={{background:T.panel,border:"1px solid "+T.border,borderRadius:6,padding:"12px 14px",marginBottom:12}}>
+                    <div style={{fontSize:8.5,color:T.teal,fontFamily:"JetBrains Mono",fontWeight:700,marginBottom:10}}>
+                      외국인 주식·채권 순매수 월별 추이 (억원)
+                    </div>
+                    <div style={{display:"flex",alignItems:"flex-end",gap:3,height:80}}>
+                      {live.fss.foreignStock.slice(-12).map(function(m,i){
+                        var maxAbs=Math.max.apply(null,live.fss.foreignStock.slice(-12).map(function(x){return Math.abs(x.stockNet||0);}));
+                        var h=maxAbs>0?Math.abs((m.stockNet||0)/maxAbs*70):2;
+                        var isPos=(m.stockNet||0)>=0;
+                        return(
+                          <div key={i} style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",gap:2}}>
+                            <div style={{fontSize:6.5,color:isPos?T.accent:T.red,fontFamily:"JetBrains Mono",
+                              whiteSpace:"nowrap",transform:"rotate(-45deg) translateY(-2px)"}}>
+                              {isPos?"+":""}{m.stockNet}
+                            </div>
+                            <div style={{width:"100%",height:h,minHeight:2,
+                              background:isPos?T.accent:T.red,
+                              borderRadius:"2px 2px 0 0",opacity:.8}}/>
+                            <div style={{fontSize:6,color:T.dim,fontFamily:"JetBrains Mono",
+                              transform:"rotate(-45deg)",whiteSpace:"nowrap",marginTop:2}}>
+                              {String(m.date).slice(4,6)}월
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {/* 월별 상세 테이블 */}
+                  <div style={{background:T.panel,border:"1px solid "+T.border,borderRadius:6,overflow:"hidden"}}>
+                    <div style={{padding:"8px 12px",borderBottom:"1px solid "+T.border,
+                      fontSize:8,color:T.muted,fontFamily:"JetBrains Mono",fontWeight:700}}>
+                      월별 상세
+                    </div>
+                    <table style={{width:"100%",borderCollapse:"collapse",fontFamily:"JetBrains Mono",fontSize:8.5}}>
+                      <thead>
+                        <tr style={{background:T.panel2}}>
+                          {["기간","주식 순매수(억)","채권 순매수(억)","합계(억)"].map(function(h,i){return(
+                            <th key={i} style={{padding:"6px 10px",textAlign:i===0?"left":"right",
+                              color:T.muted,fontWeight:700,fontSize:7.5}}>{h}</th>
+                          );})}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {live.fss.foreignStock.slice().reverse().map(function(m,i){
+                          var sp=m.stockNet||0, bp=m.bondNet||0, tp=m.totalNet||0;
+                          return(
+                            <tr key={i} style={{borderTop:"1px solid "+T.border+"55",
+                              background:i%2===0?"transparent":T.panel2+"88"}}>
+                              <td style={{padding:"6px 10px",color:T.text}}>
+                                {String(m.date).slice(0,4)}년 {String(m.date).slice(4,6)}월
+                              </td>
+                              <td style={{padding:"6px 10px",textAlign:"right",
+                                color:sp>=0?T.accent:T.red,fontWeight:700}}>
+                                {sp>=0?"+":""}{sp.toLocaleString()}
+                              </td>
+                              <td style={{padding:"6px 10px",textAlign:"right",
+                                color:bp>=0?T.teal:T.red,fontWeight:700}}>
+                                {bp>=0?"+":""}{bp.toLocaleString()}
+                              </td>
+                              <td style={{padding:"6px 10px",textAlign:"right",
+                                color:tp>=0?T.green:T.red,fontWeight:900}}>
+                                {tp>=0?"+":""}{tp.toLocaleString()}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+
+              {/* 로딩중 / 데이터 없음 */}
+              {!live.fssLive&&!(live.fss&&live.fss.corsBlocked)&&(
+                <div style={{display:"flex",flexDirection:"column",alignItems:"center",
+                  justifyContent:"center",height:200,gap:12}}>
+                  <div style={{fontSize:9,color:T.muted,fontFamily:"JetBrains Mono"}}>⟳ FSS API 데이터 로딩 중...</div>
+                  <div style={{fontSize:8,color:T.dim,fontFamily:"JetBrains Mono"}}>
+                    authKey: {FSS_KEY ? FSS_KEY.slice(0,8)+"..." : "미설정"}
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         )}
@@ -2473,7 +2949,12 @@ function ApiGuideView(){
       color:T.teal,url:"https://data.fss.or.kr",
       getKey:"① data.fss.or.kr → 공공데이터포털 (data.go.kr) → '금융감독원' 검색 → 신청",
       inputVar:"FSS_KEY",
-      liveData: live.fssLive ? ["외국인 증권투자 데이터 연결됨"] : null,
+      liveData: live.fssLive && live.fss && live.fss.foreignStock ? [
+        live.fss.foreignStock.length + "개월치 순매수 데이터",
+        live.fss.foreignStock[live.fss.foreignStock.length-1] &&
+          ("최신: " + live.fss.foreignStock[live.fss.foreignStock.length-1].date + "월 합계 " +
+           live.fss.foreignStock[live.fss.foreignStock.length-1].totalNet + "억원"),
+      ].filter(Boolean) : null,
       series:[
         {code:"외국인주식보유현황", name:"외국인 주식 순매수·잔고", unit:"억원/월"},
         {code:"외국인채권보유현황", name:"외국인 국채 보유액",       unit:"억원/월"},
